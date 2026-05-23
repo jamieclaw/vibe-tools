@@ -150,38 +150,54 @@ function getU8View(ptr, len) {
   return new Uint8Array(memory.buffer, ptr, len);
 }
 
+// low-res offscreen canvas reused frame-to-frame for surface rasterization
+let surfCanvas = null;
+let surfCtx = null;
+let surfW = 0, surfH = 0;
+const SURF_SCALE = 4;  // 1 surface pixel = 4 screen pixels — fast + smooth-ish
+
 function renderSurface() {
-  // density-thresholded surface render
   sim.compute_density();
   const gw = sim.grid_w();
   const gh = sim.grid_h();
   const dens = getF32View(sim.density_ptr(), gw * gh);
   const cs = sim.cell();
-  const img = ctx.createImageData(cv.width, cv.height);
-  const data = img.data;
-  // first pass: solid background (deep blue)
-  for (let i = 0; i < data.length; i += 4) {
-    data[i] = 0x06; data[i + 1] = 0x0a; data[i + 2] = 0x14; data[i + 3] = 255;
-  }
-  // walls
   const walls = getU8View(sim.walls_ptr(), gw * gh);
-  // bilinear sample density at each pixel
+
+  // background
+  ctx.fillStyle = '#060a0e';
+  ctx.fillRect(0, 0, cv.width, cv.height);
+
+  // build/grow surface buffer
+  const sw = Math.ceil(cv.width / SURF_SCALE);
+  const sh = Math.ceil(cv.height / SURF_SCALE);
+  if (!surfCanvas || surfW !== sw || surfH !== sh) {
+    surfCanvas = document.createElement('canvas');
+    surfCanvas.width = sw; surfCanvas.height = sh;
+    surfCtx = surfCanvas.getContext('2d');
+    surfW = sw; surfH = sh;
+  }
+  const img = surfCtx.createImageData(sw, sh);
+  const data = img.data;
   const threshold = 0.85;
-  for (let y = 0; y < cv.height; y++) {
-    const fy = y / cs - 0.5;
+  // bilinear sample once per surface pixel — sw*sh ≈ canvas/16 work
+  for (let y = 0; y < sh; y++) {
+    const py_pix = y * SURF_SCALE;
+    const fy = py_pix / cs - 0.5;
     const j0 = Math.floor(fy);
     const ty = fy - j0;
-    for (let x = 0; x < cv.width; x++) {
-      const fx = x / cs - 0.5;
+    if (j0 < 0 || j0 + 1 >= gh) continue;
+    for (let x = 0; x < sw; x++) {
+      const px_pix = x * SURF_SCALE;
+      const fx = px_pix / cs - 0.5;
       const i0 = Math.floor(fx);
       const tx = fx - i0;
-      if (i0 < 0 || j0 < 0 || i0 + 1 >= gw || j0 + 1 >= gh) continue;
-      const idx = (y * cv.width + x) * 4;
-      // walls: hard fill if cell at this px is wall
-      const ci = Math.floor(x / cs);
-      const cj = Math.floor(y / cs);
+      if (i0 < 0 || i0 + 1 >= gw) continue;
+      const idx = (y * sw + x) * 4;
+      const ci = Math.floor(px_pix / cs);
+      const cj = Math.floor(py_pix / cs);
       if (ci >= 0 && cj >= 0 && ci < gw && cj < gh && walls[ci + cj * gw]) {
-        data[idx] = 0x40; data[idx + 1] = 0x40; data[idx + 2] = 0x48;
+        data[idx] = 0x40; data[idx + 1] = 0x40; data[idx + 2] = 0x48; data[idx + 3] = 255;
         continue;
       }
       const d00 = dens[i0 + j0 * gw];
@@ -190,16 +206,18 @@ function renderSurface() {
       const d11 = dens[i0 + 1 + (j0 + 1) * gw];
       const d = (d00 * (1 - tx) + d10 * tx) * (1 - ty) + (d01 * (1 - tx) + d11 * tx) * ty;
       if (d > threshold) {
-        // water with depth shading
         const depth = Math.min(1, (d - threshold) * 3);
-        const r = 0x10 + (1 - depth) * 0x20;
-        const g = 0x70 + (1 - depth) * 0x40;
-        const b = 0xc0 + (1 - depth) * 0x30;
-        data[idx] = r; data[idx + 1] = g; data[idx + 2] = b;
+        data[idx]     = 0x10 + (1 - depth) * 0x20;
+        data[idx + 1] = 0x70 + (1 - depth) * 0x40;
+        data[idx + 2] = 0xc0 + (1 - depth) * 0x30;
+        data[idx + 3] = 255;
       }
     }
   }
-  ctx.putImageData(img, 0, 0);
+  surfCtx.putImageData(img, 0, 0);
+  // upscale (smooth via canvas-default bilinear)
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(surfCanvas, 0, 0, sw, sh, 0, 0, cv.width, cv.height);
 }
 
 function renderParticles() {
