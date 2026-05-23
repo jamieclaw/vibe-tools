@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Water Physics Sim — vibe-tools</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: system-ui, -apple-system, sans-serif;
+    background: linear-gradient(180deg, #0d1b2a 0%, #1b263b 100%);
+    color: #e0e1dd; min-height: 100vh; display: flex;
+  }
+  #sidebar {
+    width: 280px; background: rgba(0,0,0,0.35); padding: 20px;
+    border-right: 1px solid rgba(255,255,255,0.1); overflow-y: auto;
+  }
+  #sidebar h1 { margin: 0 0 4px; font-size: 18px; }
+  #sidebar p.sub { margin: 0 0 18px; font-size: 12px; opacity: 0.6; }
+  .ctrl { margin-bottom: 14px; }
+  .ctrl label {
+    display: flex; justify-content: space-between; font-size: 12px;
+    margin-bottom: 4px; opacity: 0.85;
+  }
+  .ctrl label span.v { color: #4cc9f0; font-family: monospace; }
+  .ctrl input[type=range] { width: 100%; }
+  .row { display: flex; gap: 6px; margin-top: 10px; }
+  button {
+    flex: 1; padding: 8px; background: #415a77; color: white;
+    border: 1px solid #778da9; border-radius: 4px; cursor: pointer;
+    font-size: 12px;
+  }
+  button:hover { background: #778da9; }
+  button.primary { background: #4cc9f0; color: #0d1b2a; border-color: #4cc9f0; }
+  button.primary:hover { background: #72e0ff; }
+  #stats {
+    margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.1);
+    font-size: 11px; font-family: monospace; opacity: 0.75; line-height: 1.7;
+  }
+  .hint {
+    margin-top: 16px; padding: 10px; background: rgba(76,201,240,0.1);
+    border-left: 3px solid #4cc9f0; font-size: 11px; line-height: 1.5;
+  }
+  #stage { flex: 1; position: relative; }
+  canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+  a.back { color: #4cc9f0; font-size: 12px; text-decoration: none; }
+  a.back:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div id="sidebar">
+  <a class="back" href="index.html">← back</a>
+  <h1 style="margin-top:8px">Water Physics</h1>
+  <p class="sub">SPH-style particle fluid (2D)</p>
+
+  <div class="ctrl">
+    <label>Gravity <span class="v" id="vg">800</span></label>
+    <input type="range" id="gravity" min="0" max="2500" value="800">
+  </div>
+  <div class="ctrl">
+    <label>Viscosity <span class="v" id="vv">0.30</span></label>
+    <input type="range" id="viscosity" min="0" max="200" value="30">
+  </div>
+  <div class="ctrl">
+    <label>Damping <span class="v" id="vd">0.98</span></label>
+    <input type="range" id="damping" min="80" max="100" value="98">
+  </div>
+  <div class="ctrl">
+    <label>Pressure <span class="v" id="vp">800</span></label>
+    <input type="range" id="pressure" min="100" max="3000" value="800">
+  </div>
+  <div class="ctrl">
+    <label>Particle radius <span class="v" id="vr">14</span></label>
+    <input type="range" id="radius" min="8" max="28" value="14">
+  </div>
+  <div class="ctrl">
+    <label>Particle count <span class="v" id="vc">350</span></label>
+    <input type="range" id="count" min="50" max="1200" value="350">
+  </div>
+
+  <div class="row">
+    <button id="reset">Reset</button>
+    <button class="primary" id="splash">Splash</button>
+  </div>
+  <div class="row">
+    <button id="pause">Pause</button>
+    <button id="gravswap">⇅ Flip G</button>
+  </div>
+
+  <div class="hint">
+    <b>Click + drag</b> to push fluid<br>
+    <b>Shift + drag</b> to pull
+  </div>
+
+  <div id="stats">
+    fps: <span id="fps">—</span><br>
+    particles: <span id="np">—</span>
+  </div>
+</div>
+
+<div id="stage">
+  <canvas id="cv"></canvas>
+</div>
+
+<script>
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+let W = 0, H = 0;
+function resize() {
+  const r = cv.getBoundingClientRect();
+  W = cv.width = r.width * devicePixelRatio;
+  H = cv.height = r.height * devicePixelRatio;
+  ctx.scale(1, 1);
+}
+addEventListener('resize', resize);
+resize();
+
+// ---------- params (live-bound to sliders) ----------
+const P = {
+  gravity: 800, viscosity: 0.30, damping: 0.98,
+  pressure: 800, radius: 14, count: 350,
+  paused: false,
+};
+
+function bind(id, key, fmt, parse) {
+  const el = document.getElementById(id);
+  const out = document.getElementById('v' + id[0]);
+  const update = () => {
+    P[key] = parse(+el.value);
+    out.textContent = fmt(P[key]);
+  };
+  el.addEventListener('input', update);
+  update();
+}
+bind('gravity',   'gravity',   v => v.toFixed(0),   v => v);
+bind('viscosity', 'viscosity', v => v.toFixed(2),   v => v / 100);
+bind('damping',   'damping',   v => v.toFixed(2),   v => v / 100);
+bind('pressure',  'pressure',  v => v.toFixed(0),   v => v);
+bind('radius',    'radius',    v => v.toFixed(0),   v => v);
+bind('count',     'count',     v => v.toFixed(0),   v => v);
+
+document.getElementById('count').addEventListener('change', () => initParticles());
+document.getElementById('reset').addEventListener('click', () => initParticles());
+document.getElementById('splash').addEventListener('click', () => splash());
+document.getElementById('pause').addEventListener('click', e => {
+  P.paused = !P.paused; e.target.textContent = P.paused ? 'Resume' : 'Pause';
+});
+document.getElementById('gravswap').addEventListener('click', () => P.gravity = -P.gravity);
+
+// ---------- particles ----------
+let parts = [];
+function initParticles() {
+  parts = [];
+  const n = Math.floor(P.count);
+  const cols = Math.ceil(Math.sqrt(n * (W / H)));
+  const rows = Math.ceil(n / cols);
+  const sp = P.radius * 1.6;
+  const startX = W * 0.3;
+  const startY = H * 0.2;
+  for (let i = 0; i < n; i++) {
+    const r = Math.floor(i / cols), c = i % cols;
+    parts.push({
+      x: startX + c * sp + (Math.random() - 0.5) * 2,
+      y: startY + r * sp + (Math.random() - 0.5) * 2,
+      vx: 0, vy: 0,
+    });
+  }
+}
+function splash() {
+  for (let i = 0; i < 80; i++) {
+    parts.push({
+      x: W / 2 + (Math.random() - 0.5) * 80,
+      y: H * 0.15 + (Math.random() - 0.5) * 30,
+      vx: (Math.random() - 0.5) * 200,
+      vy: (Math.random() - 0.5) * 200,
+    });
+  }
+}
+initParticles();
+
+// ---------- mouse interaction ----------
+let mouse = { x: 0, y: 0, down: false, shift: false };
+cv.addEventListener('mousedown', e => { mouse.down = true; mouse.shift = e.shiftKey; updateMouse(e); });
+cv.addEventListener('mousemove', e => updateMouse(e));
+addEventListener('mouseup', () => mouse.down = false);
+function updateMouse(e) {
+  const r = cv.getBoundingClientRect();
+  mouse.x = (e.clientX - r.left) * devicePixelRatio;
+  mouse.y = (e.clientY - r.top) * devicePixelRatio;
+  mouse.shift = e.shiftKey;
+}
+
+// ---------- spatial grid ----------
+function buildGrid(cell) {
+  const g = new Map();
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    const k = (Math.floor(p.x / cell)) + ',' + (Math.floor(p.y / cell));
+    let arr = g.get(k);
+    if (!arr) { arr = []; g.set(k, arr); }
+    arr.push(i);
+  }
+  return g;
+}
+
+// ---------- physics step ----------
+function step(dt) {
+  const r = P.radius;
+  const r2 = r * r;
+  const cell = r;
+  const grid = buildGrid(cell);
+
+  // density / pressure forces (simplified SPH-ish)
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    const cx = Math.floor(p.x / cell), cy = Math.floor(p.y / cell);
+    let fx = 0, fy = 0;
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const arr = grid.get((cx + dx) + ',' + (cy + dy));
+        if (!arr) continue;
+        for (const j of arr) {
+          if (j === i) continue;
+          const q = parts[j];
+          const ddx = p.x - q.x, ddy = p.y - q.y;
+          const d2 = ddx*ddx + ddy*ddy;
+          if (d2 >= r2 || d2 < 0.0001) continue;
+          const d = Math.sqrt(d2);
+          const overlap = (r - d) / r;
+          // pressure repulsion
+          const fmag = P.pressure * overlap * overlap;
+          fx += (ddx / d) * fmag;
+          fy += (ddy / d) * fmag;
+          // viscosity (velocity sharing)
+          const vdx = q.vx - p.vx, vdy = q.vy - p.vy;
+          fx += vdx * P.viscosity * overlap;
+          fy += vdy * P.viscosity * overlap;
+        }
+      }
+    }
+    p.vx += fx * dt;
+    p.vy += fy * dt;
+  }
+
+  // gravity + mouse force
+  for (const p of parts) {
+    p.vy += P.gravity * dt;
+    if (mouse.down) {
+      const dx = mouse.x - p.x, dy = mouse.y - p.y;
+      const d = Math.sqrt(dx*dx + dy*dy) + 1;
+      if (d < 200) {
+        const f = mouse.shift ? 1500 : -1500; // shift = pull, normal = push
+        const fall = (1 - d / 200);
+        p.vx += (dx / d) * f * fall * dt;
+        p.vy += (dy / d) * f * fall * dt;
+      }
+    }
+  }
+
+  // integrate + walls
+  for (const p of parts) {
+    p.vx *= P.damping;
+    p.vy *= P.damping;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    const m = P.radius / 2;
+    if (p.x < m) { p.x = m; p.vx *= -0.4; }
+    if (p.x > W - m) { p.x = W - m; p.vx *= -0.4; }
+    if (p.y < m) { p.y = m; p.vy *= -0.4; }
+    if (p.y > H - m) { p.y = H - m; p.vy *= -0.4; }
+  }
+}
+
+// ---------- render ----------
+function draw() {
+  // bg
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#0d1b2a');
+  g.addColorStop(1, '#1b263b');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  // metaball-ish: glow + solid
+  ctx.globalCompositeOperation = 'lighter';
+  for (const p of parts) {
+    const r = P.radius;
+    const grd = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+    grd.addColorStop(0, 'rgba(76,201,240,0.85)');
+    grd.addColorStop(0.6, 'rgba(67,97,238,0.35)');
+    grd.addColorStop(1, 'rgba(67,97,238,0)');
+    ctx.fillStyle = grd;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+
+  // mouse cursor halo
+  if (mouse.down) {
+    ctx.strokeStyle = mouse.shift ? 'rgba(255,200,100,0.6)' : 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(mouse.x, mouse.y, 200, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+// ---------- main loop ----------
+let last = performance.now();
+let fpsAcc = 0, fpsN = 0, fpsLast = last;
+function loop(now) {
+  const dt = Math.min((now - last) / 1000, 1/30);
+  last = now;
+  if (!P.paused) step(dt);
+  draw();
+
+  fpsAcc += 1 / Math.max(dt, 1e-3); fpsN++;
+  if (now - fpsLast > 500) {
+    document.getElementById('fps').textContent = (fpsAcc / fpsN).toFixed(0);
+    document.getElementById('np').textContent = parts.length;
+    fpsAcc = 0; fpsN = 0; fpsLast = now;
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
