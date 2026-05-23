@@ -2,86 +2,73 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>vibe-tools</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: system-ui, -apple-system, sans-serif;
-    background: #0d1b2a;
-    color: #e0e1dd;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 40px 20px;
-    background-image:
-      radial-gradient(circle at 20% 30%, rgba(76,201,240,0.15) 0%, transparent 50%),
-      radial-gradient(circle at 80% 70%, rgba(247,37,133,0.12) 0%, transparent 50%);
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --ink: #e6edf3;
+    --muted: #7d8590;
+    --accent: #58a6ff;
   }
-  header { text-align: center; margin-bottom: 50px; }
-  h1 {
-    font-size: clamp(36px, 6vw, 56px);
-    font-weight: 800;
-    background: linear-gradient(135deg, #4cc9f0, #f72585);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-    letter-spacing: -0.02em;
-  }
-  header p { margin-top: 8px; opacity: 0.6; font-size: 15px; }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 20px;
-    max-width: 800px;
-    width: 100%;
-  }
-  .card {
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 12px;
-    padding: 28px 24px;
-    text-decoration: none;
-    color: inherit;
-    transition: all 0.2s ease;
-    display: block;
-  }
-  .card:hover {
-    background: rgba(76,201,240,0.08);
-    border-color: rgba(76,201,240,0.4);
-    transform: translateY(-3px);
-    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-  }
-  .card .emoji { font-size: 36px; margin-bottom: 14px; display: block; }
-  .card h2 { font-size: 18px; margin-bottom: 6px; }
-  .card p { font-size: 13px; opacity: 0.7; line-height: 1.5; }
-  footer { margin-top: 60px; font-size: 12px; opacity: 0.4; }
-  footer a { color: inherit; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink);
+               font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 60px 20px; }
+  h1 { font-size: 36px; margin: 0 0 8px; font-weight: 700; }
+  .tag { color: var(--muted); margin-bottom: 40px; }
+  .tag a { color: var(--accent); text-decoration: none; }
+  .tag a:hover { text-decoration: underline; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .card { background: var(--panel); border: 1px solid #30363d; border-radius: 8px;
+          padding: 24px; text-decoration: none; color: var(--ink);
+          transition: transform 0.15s, border-color 0.15s; display: block; }
+  .card:hover { transform: translateY(-2px); border-color: var(--accent); }
+  .emoji { font-size: 40px; margin-bottom: 12px; }
+  .card h2 { font-size: 18px; margin: 0 0 6px; font-weight: 600; }
+  .card p { color: var(--muted); font-size: 14px; line-height: 1.5; margin: 0 0 12px; }
+  .badges { display: flex; gap: 6px; flex-wrap: wrap; }
+  .badge { font-size: 10px; padding: 2px 8px; border-radius: 10px;
+           background: #21262d; color: var(--muted); border: 1px solid #30363d; }
+  .badge.wasm { background: #1f6feb; color: white; border-color: #1f6feb; }
+  .badge.three { background: #8957e5; color: white; border-color: #8957e5; }
+  footer { margin-top: 60px; color: var(--muted); font-size: 12px; text-align: center; }
 </style>
 </head>
 <body>
-<header>
+<div class="wrap">
   <h1>vibe-tools</h1>
-  <p>tiny browser experiments</p>
-</header>
-
-<div class="grid">
-  <a class="card" href="minecraft.html">
-    <span class="emoji">⛏️</span>
-    <h2>Voxel Mini</h2>
-    <p>A bite-size Minecraft clone. WASD + mouse, break and place blocks, build whatever.</p>
-  </a>
-  <a class="card" href="water.html">
-    <span class="emoji">💧</span>
-    <h2>Water Physics</h2>
-    <p>SPH-style 2D fluid simulator with live-adjustable gravity, viscosity, pressure & damping.</p>
-  </a>
+  <p class="tag">Tiny browser experiments. Source on <a href="https://github.com/jamieclaw/vibe-tools" target="_blank">GitHub</a>.</p>
+  <div class="grid">
+    <a class="card" href="./water2d.html">
+      <div class="emoji">💧</div>
+      <h2>Water 2D</h2>
+      <p>PIC/FLIP fluid simulator with paint-able walls, splash impulses, and density-based surface render.</p>
+      <div class="badges">
+        <span class="badge wasm">WASM</span>
+        <span class="badge">PIC/FLIP</span>
+      </div>
+    </a>
+    <a class="card" href="./water3d.html">
+      <div class="emoji">🌊</div>
+      <h2>Water 3D</h2>
+      <p>Volumetric PIC/FLIP fluid in a glass box, rendered as instanced particles with orbit camera and shake.</p>
+      <div class="badges">
+        <span class="badge wasm">WASM</span>
+        <span class="badge three">Three.js</span>
+      </div>
+    </a>
+    <a class="card" href="./minecraft.html">
+      <div class="emoji">⛏</div>
+      <h2>Minecraft-ish</h2>
+      <p>Voxel sandbox with procedural terrain, WASD + mouse fly controls, and place/remove blocks.</p>
+      <div class="badges">
+        <span class="badge three">Three.js</span>
+      </div>
+    </a>
+  </div>
+  <footer>Built with Rust + WebAssembly · deployed via GitHub Actions</footer>
 </div>
-
-<footer>
-  <a href="https://github.com/jamieclaw/vibe-tools">github.com/jamieclaw/vibe-tools</a>
-</footer>
 </body>
 </html>

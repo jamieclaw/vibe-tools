@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Water 2D — WASM PIC/FLIP</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #131a23;
+    --ink: #e6edf3;
+    --muted: #7d8590;
+    --accent: #58a6ff;
+    --water: #4ec3ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink);
+               font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  header { display: flex; align-items: center; justify-content: space-between;
+           padding: 10px 16px; background: var(--panel); border-bottom: 1px solid #222; }
+  h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  h1 small { color: var(--muted); font-weight: 400; margin-left: 8px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  main { display: flex; flex-direction: row; height: calc(100vh - 50px); }
+  #canvasWrap { flex: 1; position: relative; background: #060a0e; overflow: hidden; }
+  canvas { display: block; image-rendering: pixelated; }
+  #side { width: 280px; padding: 14px; background: var(--panel); overflow-y: auto;
+          border-left: 1px solid #222; font-size: 13px; }
+  .row { margin: 8px 0; }
+  label { display: block; color: var(--muted); margin-bottom: 4px; font-size: 11px;
+          text-transform: uppercase; letter-spacing: 0.05em; }
+  input[type=range] { width: 100%; }
+  .val { float: right; color: var(--accent); font-variant-numeric: tabular-nums; }
+  button { background: #21262d; color: var(--ink); border: 1px solid #30363d;
+           padding: 6px 10px; border-radius: 4px; cursor: pointer; margin: 2px;
+           font-size: 12px; }
+  button:hover { background: #30363d; }
+  button.primary { background: #1f6feb; border-color: #1f6feb; }
+  button.primary:hover { background: #388bfd; }
+  .stat { display: flex; justify-content: space-between; padding: 4px 0;
+          border-bottom: 1px solid #222; font-size: 12px; }
+  .hint { color: var(--muted); font-size: 11px; line-height: 1.5; margin-top: 12px; }
+  #fps { position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,.5);
+         padding: 4px 8px; border-radius: 3px; font-size: 11px; color: var(--accent);
+         font-family: ui-monospace, monospace; pointer-events: none; }
+  .badge { display: inline-block; background: #1f6feb; color: white;
+           padding: 2px 6px; border-radius: 3px; font-size: 10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>💧 Water 2D <small>PIC/FLIP · <span class="badge">WASM</span></small></h1>
+  <a href="./">← back</a>
+</header>
+<main>
+  <div id="canvasWrap">
+    <canvas id="cv"></canvas>
+    <div id="fps">loading wasm…</div>
+  </div>
+  <aside id="side">
+    <div class="row">
+      <label>Particles <span class="val" id="vCount">4000</span></label>
+      <input type="range" id="iCount" min="500" max="8000" step="500" value="4000">
+    </div>
+    <div class="row">
+      <label>Gravity <span class="val" id="vGrav">10</span></label>
+      <input type="range" id="iGrav" min="0" max="30" step="0.5" value="10">
+    </div>
+    <div class="row">
+      <label>FLIP ratio <span class="val" id="vFlip">0.97</span></label>
+      <input type="range" id="iFlip" min="0" max="1" step="0.01" value="0.97">
+    </div>
+    <div class="row">
+      <label>Solver iters <span class="val" id="vIter">40</span></label>
+      <input type="range" id="iIter" min="5" max="80" step="1" value="40">
+    </div>
+    <div class="row">
+      <label>Render mode</label>
+      <select id="iMode" style="width:100%; padding:6px; background:#0d1117; color:var(--ink); border:1px solid #30363d; border-radius:4px;">
+        <option value="surface">Surface (smooth)</option>
+        <option value="particles">Particles</option>
+        <option value="both">Both</option>
+      </select>
+    </div>
+    <div class="row">
+      <button class="primary" id="bReset">⟳ Reset</button>
+      <button id="bSplash">💦 Splash</button>
+      <button id="bPause">⏸ Pause</button>
+      <button id="bClearWalls">Clear walls</button>
+    </div>
+    <div class="row">
+      <div class="stat"><span>Particles</span><span id="sCount">—</span></div>
+      <div class="stat"><span>Grid</span><span id="sGrid">—</span></div>
+      <div class="stat"><span>Step</span><span id="sStep">— ms</span></div>
+    </div>
+    <p class="hint">
+      🖱 <b>Left drag</b> push water · <b>Shift+drag</b> pull · <b>Right drag</b> paint walls.<br>
+      Compiled from Rust → WebAssembly. Code at <a href="https://github.com/jamieclaw/vibe-tools" target="_blank">jamieclaw/vibe-tools</a>.
+    </p>
+  </aside>
+</main>
+
+<script type="module">
+import init, { Sim2D } from './pkg/fluid_sim.js';
+
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const wrap = document.getElementById('canvasWrap');
+const fpsEl = document.getElementById('fps');
+
+let sim;
+let memory;
+let cellPx = 16;
+let paused = false;
+let renderMode = 'surface';
+let lastT = performance.now();
+let stepMs = 0;
+
+// pointer state
+const ptr = { down: false, x: 0, y: 0, px: 0, py: 0, btn: 0, shift: false };
+
+function resizeCanvas() {
+  const rect = wrap.getBoundingClientRect();
+  cv.width = Math.floor(rect.width);
+  cv.height = Math.floor(rect.height);
+}
+
+function rebuildSim(count) {
+  if (sim) sim.free();
+  const w = cv.width;
+  const h = cv.height;
+  sim = new Sim2D(w, h, cellPx);
+  sim.gravity = parseFloat(document.getElementById('iGrav').value) * 60;
+  sim.flip_ratio = parseFloat(document.getElementById('iFlip').value);
+  sim.iters = parseInt(document.getElementById('iIter').value);
+  // fill bottom 60%
+  const x0 = w * 0.1;
+  const x1 = w * 0.9;
+  const y0 = h * 0.4;
+  const y1 = h * 0.95;
+  sim.reset_particles(count, x0, y0, x1, y1);
+  document.getElementById('sGrid').textContent = `${sim.grid_w()} × ${sim.grid_h()}`;
+}
+
+function getF32View(ptr, len) {
+  return new Float32Array(memory.buffer, ptr, len);
+}
+function getU8View(ptr, len) {
+  return new Uint8Array(memory.buffer, ptr, len);
+}
+
+function renderSurface() {
+  // density-thresholded surface render
+  sim.compute_density();
+  const gw = sim.grid_w();
+  const gh = sim.grid_h();
+  const dens = getF32View(sim.density_ptr(), gw * gh);
+  const cs = sim.cell();
+  const img = ctx.createImageData(cv.width, cv.height);
+  const data = img.data;
+  // first pass: solid background (deep blue)
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = 0x06; data[i + 1] = 0x0a; data[i + 2] = 0x14; data[i + 3] = 255;
+  }
+  // walls
+  const walls = getU8View(sim.walls_ptr(), gw * gh);
+  // bilinear sample density at each pixel
+  const threshold = 0.85;
+  for (let y = 0; y < cv.height; y++) {
+    const fy = y / cs - 0.5;
+    const j0 = Math.floor(fy);
+    const ty = fy - j0;
+    for (let x = 0; x < cv.width; x++) {
+      const fx = x / cs - 0.5;
+      const i0 = Math.floor(fx);
+      const tx = fx - i0;
+      if (i0 < 0 || j0 < 0 || i0 + 1 >= gw || j0 + 1 >= gh) continue;
+      const idx = (y * cv.width + x) * 4;
+      // walls: hard fill if cell at this px is wall
+      const ci = Math.floor(x / cs);
+      const cj = Math.floor(y / cs);
+      if (ci >= 0 && cj >= 0 && ci < gw && cj < gh && walls[ci + cj * gw]) {
+        data[idx] = 0x40; data[idx + 1] = 0x40; data[idx + 2] = 0x48;
+        continue;
+      }
+      const d00 = dens[i0 + j0 * gw];
+      const d10 = dens[i0 + 1 + j0 * gw];
+      const d01 = dens[i0 + (j0 + 1) * gw];
+      const d11 = dens[i0 + 1 + (j0 + 1) * gw];
+      const d = (d00 * (1 - tx) + d10 * tx) * (1 - ty) + (d01 * (1 - tx) + d11 * tx) * ty;
+      if (d > threshold) {
+        // water with depth shading
+        const depth = Math.min(1, (d - threshold) * 3);
+        const r = 0x10 + (1 - depth) * 0x20;
+        const g = 0x70 + (1 - depth) * 0x40;
+        const b = 0xc0 + (1 - depth) * 0x30;
+        data[idx] = r; data[idx + 1] = g; data[idx + 2] = b;
+      }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function renderParticles() {
+  ctx.fillStyle = '#060a0e';
+  ctx.fillRect(0, 0, cv.width, cv.height);
+  // walls
+  const gw = sim.grid_w();
+  const gh = sim.grid_h();
+  const cs = sim.cell();
+  const walls = getU8View(sim.walls_ptr(), gw * gh);
+  ctx.fillStyle = '#404048';
+  for (let j = 0; j < gh; j++) {
+    for (let i = 0; i < gw; i++) {
+      if (walls[i + j * gw]) ctx.fillRect(i * cs, j * cs, cs, cs);
+    }
+  }
+  const n = sim.particle_count();
+  const px = getF32View(sim.px_ptr(), n);
+  const py = getF32View(sim.py_ptr(), n);
+  ctx.fillStyle = '#4ec3ff';
+  for (let k = 0; k < n; k++) {
+    ctx.fillRect(px[k] - 1.5, py[k] - 1.5, 3, 3);
+  }
+}
+
+function renderBoth() {
+  renderSurface();
+  const n = sim.particle_count();
+  const px = getF32View(sim.px_ptr(), n);
+  const py = getF32View(sim.py_ptr(), n);
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  for (let k = 0; k < n; k++) {
+    ctx.fillRect(px[k] - 0.5, py[k] - 0.5, 1, 1);
+  }
+}
+
+function loop() {
+  if (!paused) {
+    const dt = 1 / 60;
+    if (ptr.down && ptr.btn === 0) {
+      const dvx = (ptr.x - ptr.px) * 60;
+      const dvy = (ptr.y - ptr.py) * 60;
+      sim.apply_force(ptr.x, ptr.y, dvx, dvy, 60, ptr.shift, dt);
+    } else if (ptr.down && ptr.btn === 2) {
+      const ci = Math.floor(ptr.x / sim.cell());
+      const cj = Math.floor(ptr.y / sim.cell());
+      sim.paint_wall(ci, cj, 2, ptr.shift ? 0 : 1);
+    }
+    const t0 = performance.now();
+    sim.step(dt);
+    stepMs = stepMs * 0.9 + (performance.now() - t0) * 0.1;
+  }
+  if (renderMode === 'surface') renderSurface();
+  else if (renderMode === 'particles') renderParticles();
+  else renderBoth();
+
+  // FPS
+  const now = performance.now();
+  const fps = 1000 / (now - lastT);
+  lastT = now;
+  fpsEl.textContent = `${fps.toFixed(0)} fps · step ${stepMs.toFixed(1)}ms`;
+  document.getElementById('sCount').textContent = sim.particle_count();
+  document.getElementById('sStep').textContent = stepMs.toFixed(1) + ' ms';
+  ptr.px = ptr.x; ptr.py = ptr.y;
+  requestAnimationFrame(loop);
+}
+
+async function boot() {
+  const out = await init();
+  memory = out.memory;
+  resizeCanvas();
+  rebuildSim(parseInt(document.getElementById('iCount').value));
+  // wire events
+  cv.addEventListener('contextmenu', e => e.preventDefault());
+  cv.addEventListener('pointerdown', e => {
+    cv.setPointerCapture(e.pointerId);
+    ptr.down = true; ptr.btn = e.button; ptr.shift = e.shiftKey;
+    const r = cv.getBoundingClientRect();
+    ptr.x = e.clientX - r.left; ptr.y = e.clientY - r.top;
+    ptr.px = ptr.x; ptr.py = ptr.y;
+  });
+  cv.addEventListener('pointermove', e => {
+    const r = cv.getBoundingClientRect();
+    ptr.x = e.clientX - r.left; ptr.y = e.clientY - r.top;
+    ptr.shift = e.shiftKey;
+  });
+  cv.addEventListener('pointerup', () => { ptr.down = false; });
+
+  const wire = (id, vId, fn) => {
+    const el = document.getElementById(id);
+    const vEl = document.getElementById(vId);
+    el.addEventListener('input', () => {
+      vEl.textContent = el.value;
+      fn(el.value);
+    });
+  };
+  wire('iCount', 'vCount', v => rebuildSim(parseInt(v)));
+  wire('iGrav', 'vGrav', v => sim.gravity = parseFloat(v) * 60);
+  wire('iFlip', 'vFlip', v => sim.flip_ratio = parseFloat(v));
+  wire('iIter', 'vIter', v => sim.iters = parseInt(v));
+  document.getElementById('iMode').addEventListener('change', e => renderMode = e.target.value);
+  document.getElementById('bReset').onclick = () =>
+    rebuildSim(parseInt(document.getElementById('iCount').value));
+  document.getElementById('bSplash').onclick = () =>
+    sim.splash(cv.width / 2, 30, 200, 600);
+  document.getElementById('bPause').onclick = (e) => {
+    paused = !paused;
+    e.target.textContent = paused ? '▶ Resume' : '⏸ Pause';
+  };
+  document.getElementById('bClearWalls').onclick = () => sim.clear_walls();
+
+  window.addEventListener('resize', () => {
+    resizeCanvas();
+    rebuildSim(parseInt(document.getElementById('iCount').value));
+  });
+
+  loop();
+}
+boot().catch(err => {
+  fpsEl.textContent = 'init failed: ' + err.message;
+  console.error(err);
+});
+</script>
+</body>
+</html>

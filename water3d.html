@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Water 3D — WASM PIC/FLIP</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #131a23;
+    --ink: #e6edf3;
+    --muted: #7d8590;
+    --accent: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink);
+               font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+               overflow: hidden; }
+  header { display: flex; align-items: center; justify-content: space-between;
+           padding: 10px 16px; background: var(--panel); border-bottom: 1px solid #222;
+           position: relative; z-index: 10; }
+  h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  h1 small { color: var(--muted); font-weight: 400; margin-left: 8px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  main { display: flex; flex-direction: row; height: calc(100vh - 50px); }
+  #canvasWrap { flex: 1; position: relative; }
+  #cv { display: block; width: 100%; height: 100%; }
+  #side { width: 280px; padding: 14px; background: var(--panel); overflow-y: auto;
+          border-left: 1px solid #222; font-size: 13px; }
+  .row { margin: 8px 0; }
+  label { display: block; color: var(--muted); margin-bottom: 4px; font-size: 11px;
+          text-transform: uppercase; letter-spacing: 0.05em; }
+  input[type=range] { width: 100%; }
+  .val { float: right; color: var(--accent); font-variant-numeric: tabular-nums; }
+  button { background: #21262d; color: var(--ink); border: 1px solid #30363d;
+           padding: 6px 10px; border-radius: 4px; cursor: pointer; margin: 2px;
+           font-size: 12px; }
+  button:hover { background: #30363d; }
+  button.primary { background: #1f6feb; border-color: #1f6feb; }
+  button.primary:hover { background: #388bfd; }
+  .stat { display: flex; justify-content: space-between; padding: 4px 0;
+          border-bottom: 1px solid #222; font-size: 12px; }
+  .hint { color: var(--muted); font-size: 11px; line-height: 1.5; margin-top: 12px; }
+  #fps { position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,.5);
+         padding: 4px 8px; border-radius: 3px; font-size: 11px; color: var(--accent);
+         font-family: ui-monospace, monospace; pointer-events: none; }
+  .badge { display: inline-block; background: #1f6feb; color: white;
+           padding: 2px 6px; border-radius: 3px; font-size: 10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🌊 Water 3D <small>PIC/FLIP · <span class="badge">WASM</span> · <span class="badge" style="background:#8957e5">Three.js</span></small></h1>
+  <a href="./">← back</a>
+</header>
+<main>
+  <div id="canvasWrap">
+    <canvas id="cv"></canvas>
+    <div id="fps">loading wasm…</div>
+  </div>
+  <aside id="side">
+    <div class="row">
+      <label>Particles <span class="val" id="vCount">3000</span></label>
+      <input type="range" id="iCount" min="500" max="6000" step="500" value="3000">
+    </div>
+    <div class="row">
+      <label>Grid (each axis) <span class="val" id="vGrid">24</span></label>
+      <input type="range" id="iGrid" min="12" max="40" step="2" value="24">
+    </div>
+    <div class="row">
+      <label>Gravity <span class="val" id="vGrav">9.8</span></label>
+      <input type="range" id="iGrav" min="0" max="30" step="0.5" value="9.8">
+    </div>
+    <div class="row">
+      <label>FLIP ratio <span class="val" id="vFlip">0.97</span></label>
+      <input type="range" id="iFlip" min="0" max="1" step="0.01" value="0.97">
+    </div>
+    <div class="row">
+      <label>Solver iters <span class="val" id="vIter">30</span></label>
+      <input type="range" id="iIter" min="5" max="60" step="1" value="30">
+    </div>
+    <div class="row">
+      <button class="primary" id="bReset">⟳ Reset</button>
+      <button id="bSplash">💦 Splash</button>
+      <button id="bPause">⏸ Pause</button>
+      <button id="bShake">🌀 Shake</button>
+    </div>
+    <div class="row">
+      <div class="stat"><span>Particles</span><span id="sCount">—</span></div>
+      <div class="stat"><span>Grid</span><span id="sGrid">—</span></div>
+      <div class="stat"><span>Step</span><span id="sStep">— ms</span></div>
+    </div>
+    <p class="hint">
+      🖱 <b>Left drag</b> orbit · <b>Right drag</b> pan · <b>Wheel</b> zoom · <b>Space</b> shake.<br>
+      Compiled from Rust → WebAssembly. Source at <a href="https://github.com/jamieclaw/vibe-tools" target="_blank">jamieclaw/vibe-tools</a>.
+    </p>
+  </aside>
+</main>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import init, { Sim3D } from './pkg/fluid_sim.js';
+
+const cv = document.getElementById('cv');
+const wrap = document.getElementById('canvasWrap');
+const fpsEl = document.getElementById('fps');
+
+let sim, memory;
+let gridN = 24;
+let renderer, scene, camera, controls;
+let particleMesh, boxMesh;
+let paused = false;
+let lastT = performance.now();
+let stepMs = 0;
+let shakeT = 0;
+
+function setupThree() {
+  const rect = wrap.getBoundingClientRect();
+  renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(rect.width, rect.height, false);
+  renderer.setClearColor(0x060a0e);
+
+  scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x060a0e, 40, 120);
+
+  camera = new THREE.PerspectiveCamera(50, rect.width / rect.height, 0.1, 500);
+  camera.position.set(40, 28, 40);
+
+  controls = new OrbitControls(camera, cv);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.target.set(gridN / 2, gridN / 2, gridN / 2);
+
+  // lighting
+  const amb = new THREE.AmbientLight(0xffffff, 0.4);
+  scene.add(amb);
+  const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+  sun.position.set(20, 40, 20);
+  scene.add(sun);
+  const fill = new THREE.DirectionalLight(0x88aaff, 0.4);
+  fill.position.set(-20, 10, -20);
+  scene.add(fill);
+
+  // floor
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(80, 80),
+    new THREE.MeshStandardMaterial({ color: 0x14202a, roughness: 0.9 })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = -0.1;
+  scene.add(floor);
+
+  // grid helper
+  const grid = new THREE.GridHelper(80, 40, 0x223344, 0x162028);
+  grid.position.y = 0;
+  scene.add(grid);
+}
+
+function makeContainer(g) {
+  if (boxMesh) scene.remove(boxMesh);
+  const geom = new THREE.BoxGeometry(g, g, g);
+  const edges = new THREE.EdgesGeometry(geom);
+  boxMesh = new THREE.LineSegments(
+    edges,
+    new THREE.LineBasicMaterial({ color: 0x4ec3ff, transparent: true, opacity: 0.5 })
+  );
+  boxMesh.position.set(g / 2, g / 2, g / 2);
+  scene.add(boxMesh);
+}
+
+function makeParticleMesh(count) {
+  if (particleMesh) {
+    scene.remove(particleMesh);
+    particleMesh.geometry.dispose();
+    particleMesh.material.dispose();
+  }
+  const geom = new THREE.IcosahedronGeometry(0.32, 0);
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x4ec3ff,
+    emissive: 0x0a3050,
+    emissiveIntensity: 0.4,
+    roughness: 0.2,
+    metalness: 0.4,
+  });
+  particleMesh = new THREE.InstancedMesh(geom, mat, count);
+  particleMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  scene.add(particleMesh);
+}
+
+function rebuildSim(count, gN) {
+  if (sim) sim.free();
+  gridN = gN;
+  sim = new Sim3D(gridN, gridN, gridN);
+  sim.gravity = parseFloat(document.getElementById('iGrav').value);
+  sim.flip_ratio = parseFloat(document.getElementById('iFlip').value);
+  sim.iters = parseInt(document.getElementById('iIter').value);
+  // fill bottom half
+  const m = 1.5;
+  sim.reset_particles(count, m, m, m, gridN - m, gridN * 0.55, gridN - m);
+  makeContainer(gridN);
+  makeParticleMesh(count);
+  if (controls) controls.target.set(gridN / 2, gridN / 2, gridN / 2);
+  document.getElementById('sGrid').textContent = `${gridN}³`;
+}
+
+function getF32(ptr, len) { return new Float32Array(memory.buffer, ptr, len); }
+
+const _m = new THREE.Matrix4();
+const _q = new THREE.Quaternion();
+const _s = new THREE.Vector3(1, 1, 1);
+const _p = new THREE.Vector3();
+
+function updateInstances() {
+  const n = sim.particle_count();
+  const px = getF32(sim.px_ptr(), n);
+  const py = getF32(sim.py_ptr(), n);
+  const pz = getF32(sim.pz_ptr(), n);
+  const pvy = getF32(sim.pvy_ptr(), n);
+
+  for (let i = 0; i < n; i++) {
+    _p.set(px[i], py[i], pz[i]);
+    // optional: tint by speed, but InstancedMesh w/ standard mat doesn't support per-instance color
+    // efficiently without setColorAt — let's add it for visual flair
+    _m.compose(_p, _q, _s);
+    particleMesh.setMatrixAt(i, _m);
+  }
+  particleMesh.instanceMatrix.needsUpdate = true;
+  particleMesh.count = n;
+
+  // depth-based color via setColorAt would require adding an InstancedColor attr;
+  // skip for perf, monochrome looks clean enough.
+}
+
+function loop() {
+  if (!paused) {
+    const dt = 1 / 60;
+    if (shakeT > 0) {
+      const a = (Math.random() - 0.5) * 30;
+      const c = (Math.random() - 0.5) * 30;
+      sim.apply_force(gridN/2, gridN/2, gridN/2, a, 0, c, gridN);
+      shakeT--;
+    }
+    const t0 = performance.now();
+    sim.step(dt);
+    stepMs = stepMs * 0.9 + (performance.now() - t0) * 0.1;
+  }
+  updateInstances();
+  controls.update();
+  renderer.render(scene, camera);
+
+  const now = performance.now();
+  const fps = 1000 / (now - lastT);
+  lastT = now;
+  fpsEl.textContent = `${fps.toFixed(0)} fps · step ${stepMs.toFixed(1)}ms`;
+  document.getElementById('sCount').textContent = sim.particle_count();
+  document.getElementById('sStep').textContent = stepMs.toFixed(1) + ' ms';
+
+  requestAnimationFrame(loop);
+}
+
+async function boot() {
+  const out = await init();
+  memory = out.memory;
+  setupThree();
+  rebuildSim(
+    parseInt(document.getElementById('iCount').value),
+    parseInt(document.getElementById('iGrid').value)
+  );
+
+  const wire = (id, vId, fn) => {
+    const el = document.getElementById(id);
+    const vEl = document.getElementById(vId);
+    el.addEventListener('input', () => {
+      vEl.textContent = el.value;
+      fn(el.value);
+    });
+  };
+  wire('iCount', 'vCount', v => rebuildSim(parseInt(v), gridN));
+  wire('iGrid', 'vGrid', v =>
+    rebuildSim(parseInt(document.getElementById('iCount').value), parseInt(v)));
+  wire('iGrav', 'vGrav', v => sim.gravity = parseFloat(v));
+  wire('iFlip', 'vFlip', v => sim.flip_ratio = parseFloat(v));
+  wire('iIter', 'vIter', v => sim.iters = parseInt(v));
+  document.getElementById('bReset').onclick = () =>
+    rebuildSim(parseInt(document.getElementById('iCount').value), gridN);
+  document.getElementById('bSplash').onclick = () =>
+    sim.splash(gridN/2, gridN - 2, gridN/2, 200, 12);
+  document.getElementById('bPause').onclick = (e) => {
+    paused = !paused;
+    e.target.textContent = paused ? '▶ Resume' : '⏸ Pause';
+  };
+  document.getElementById('bShake').onclick = () => { shakeT = 8; };
+  document.addEventListener('keydown', e => {
+    if (e.code === 'Space') { shakeT = 8; e.preventDefault(); }
+  });
+
+  window.addEventListener('resize', () => {
+    const r = wrap.getBoundingClientRect();
+    renderer.setSize(r.width, r.height, false);
+    camera.aspect = r.width / r.height;
+    camera.updateProjectionMatrix();
+  });
+
+  loop();
+}
+boot().catch(err => {
+  fpsEl.textContent = 'init failed: ' + err.message;
+  console.error(err);
+});
+</script>
+</body>
+</html>

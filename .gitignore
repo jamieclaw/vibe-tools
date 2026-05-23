@@ -144,3 +144,8 @@ vite.config.ts.timestamp-*
 
 # editor backups
 *.bak
+
+# Rust build artifacts
+fluid-sim/target/
+fluid-sim/Cargo.lock
+fluid-sim/pkg/
