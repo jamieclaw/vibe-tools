@@ -46,7 +46,7 @@
 <div id="info">
   WASD: move &nbsp;·&nbsp; Space: jump &nbsp;·&nbsp; Mouse: look<br>
   Left click: break &nbsp;·&nbsp; Right click: place<br>
-  1-5: select block &nbsp;·&nbsp; ESC: release mouse<br>
+  1-6: select block &nbsp;·&nbsp; ESC: release mouse<br>
   <a href="index.html">← back</a>
 </div>
 <div id="crosshair"></div>
@@ -54,7 +54,7 @@
 <div id="start">
   <h1>Voxel Mini</h1>
   <p>Click to lock mouse and play.</p>
-  <p style="opacity:0.6">WASD + mouse + click</p>
+  <p style="opacity:0.6">Now with water, shadows &amp; shaders</p>
 </div>
 
 <script type="importmap">
@@ -66,13 +66,18 @@ import * as THREE from 'three';
 
 // ---------- scene ----------
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87CEEB);
-scene.fog = new THREE.Fog(0x87CEEB, 30, 80);
+scene.background = new THREE.Color(0x9ad6ef);
+scene.fog = new THREE.Fog(0x9ad6ef, 35, 95);
 
-const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 200);
+const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 300);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 
 addEventListener('resize', () => {
@@ -81,25 +86,82 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
+// ---------- sky dome (gradient) ----------
+const skyGeo = new THREE.SphereGeometry(200, 32, 16);
+const skyMat = new THREE.ShaderMaterial({
+  side: THREE.BackSide,
+  uniforms: {
+    topColor:    { value: new THREE.Color(0x4a90c8) },
+    bottomColor: { value: new THREE.Color(0xd8e8f4) },
+    offset:      { value: 8.0 },
+    exponent:    { value: 0.7 },
+  },
+  vertexShader: `
+    varying vec3 vWorld;
+    void main() {
+      vec4 wp = modelMatrix * vec4(position, 1.0);
+      vWorld = wp.xyz;
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }
+  `,
+  fragmentShader: `
+    uniform vec3 topColor;
+    uniform vec3 bottomColor;
+    uniform float offset;
+    uniform float exponent;
+    varying vec3 vWorld;
+    void main() {
+      float h = normalize(vWorld + vec3(0.0, offset, 0.0)).y;
+      float t = max(pow(max(h, 0.0), exponent), 0.0);
+      gl_FragColor = vec4(mix(bottomColor, topColor, t), 1.0);
+    }
+  `,
+});
+const sky = new THREE.Mesh(skyGeo, skyMat);
+scene.add(sky);
+
 // ---------- lighting ----------
-const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-sun.position.set(50, 80, 30);
+const sun = new THREE.DirectionalLight(0xfff1d6, 2.2);
+sun.position.set(40, 70, 25);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.near = 1;
+sun.shadow.camera.far = 200;
+sun.shadow.camera.left = -40;
+sun.shadow.camera.right = 40;
+sun.shadow.camera.top = 40;
+sun.shadow.camera.bottom = -40;
+sun.shadow.bias = -0.0005;
+sun.shadow.normalBias = 0.04;
 scene.add(sun);
-scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-scene.add(new THREE.HemisphereLight(0x87CEEB, 0x444422, 0.4));
+scene.add(sun.target);
+
+scene.add(new THREE.AmbientLight(0xc8d8ff, 0.35));
+scene.add(new THREE.HemisphereLight(0x9ad6ef, 0x4a3a22, 0.55));
 
 // ---------- block types ----------
 const BLOCKS = [
-  { name: 'grass', color: 0x4CAF50, top: 0x66BB6A },
-  { name: 'dirt',  color: 0x6D4C41 },
-  { name: 'stone', color: 0x9E9E9E },
+  { name: 'grass', color: 0x6cc14a, top: 0x88dd5a },
+  { name: 'dirt',  color: 0x8a5a3a },
+  { name: 'stone', color: 0xa0a0a0 },
   { name: 'wood',  color: 0x8B5A2B },
-  { name: 'leaf',  color: 0x2E7D32 },
+  { name: 'leaf',  color: 0x3a8d3e },
+  { name: 'sand',  color: 0xe6d8a3 },
 ];
 let activeBlock = 0;
 
-// material per block
-const materials = BLOCKS.map(b => new THREE.MeshLambertMaterial({ color: b.color }));
+// solid block materials (per-block; grass uses an array for per-face top tint)
+const materials = BLOCKS.map(b => {
+  const m = new THREE.MeshLambertMaterial({ color: b.color });
+  return m;
+});
+// Special: grass top
+const grassTopMat = new THREE.MeshLambertMaterial({ color: 0x88dd5a });
+const grassSideMat = materials[0];
+// Box face order: +x, -x, +y, -y, +z, -z
+function grassMaterials() {
+  return [grassSideMat, grassSideMat, grassTopMat, materials[1], grassSideMat, grassSideMat];
+}
 
 // ---------- world (sparse map of "x,y,z" -> mesh) ----------
 const world = new Map();
@@ -110,9 +172,12 @@ function key(x, y, z) { return `${x},${y},${z}`; }
 function addBlock(x, y, z, type) {
   const k = key(x, y, z);
   if (world.has(k)) return;
-  const mesh = new THREE.Mesh(blockGeo, materials[type]);
+  const mat = type === 0 ? grassMaterials() : materials[type];
+  const mesh = new THREE.Mesh(blockGeo, mat);
   mesh.position.set(x, y, z);
   mesh.userData.type = type;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
   scene.add(mesh);
   world.set(k, mesh);
 }
@@ -123,9 +188,8 @@ function removeBlock(mesh) {
   scene.remove(mesh);
 }
 
-// ---------- terrain (heightmap with simple hash noise) ----------
+// ---------- terrain (heightmap + water) ----------
 function noise(x, z) {
-  // cheap deterministic 2D hash → smooth-ish heightmap via interpolation
   function h(ix, iz) {
     const n = Math.sin(ix * 12.9898 + iz * 78.233) * 43758.5453;
     return n - Math.floor(n);
@@ -137,29 +201,60 @@ function noise(x, z) {
   return (a*(1-sx)+b*sx)*(1-sz) + (c*(1-sx)+d*sx)*sz;
 }
 
-const SIZE = 24; // half-extent
+const SIZE = 24;
+const SEA_LEVEL = 1; // y = 1 means water surface at y=1.5
+const heightmap = new Map();
+
+// First pass: build heightmap and figure out which blocks exist
+const blockPlan = []; // {x,y,z,type}
 for (let x = -SIZE; x <= SIZE; x++) {
   for (let z = -SIZE; z <= SIZE; z++) {
-    const h = Math.floor(noise(x*0.12, z*0.12) * 6) + Math.floor(noise(x*0.05, z*0.05) * 4);
+    // bias toward valleys: subtract 1.5 so a chunk goes underwater
+    const raw = Math.floor(noise(x*0.12, z*0.12) * 6) + Math.floor(noise(x*0.05, z*0.05) * 4);
+    const h = raw - 2; // shift down so water level cuts in
+    heightmap.set(`${x},${z}`, h);
     for (let y = -3; y <= h; y++) {
       let type;
-      if (y === h) type = 0;          // grass top
-      else if (y > h - 3) type = 1;   // dirt
-      else type = 2;                  // stone
-      addBlock(x, y, z, type);
+      if (y === h) {
+        // sand if at/near water, grass otherwise
+        type = (h <= SEA_LEVEL + 1) ? 5 : 0;
+      } else if (y > h - 3) {
+        type = 1;
+      } else {
+        type = 2;
+      }
+      blockPlan.push({ x, y, z, type });
     }
   }
 }
 
-// scatter a few trees
-for (let i = 0; i < 15; i++) {
+// Inner-block culling: skip blocks fully surrounded by other blocks.
+// Build a set of all planned positions for O(1) neighbor lookup.
+const planSet = new Set(blockPlan.map(p => `${p.x},${p.y},${p.z}`));
+function neighborExists(x, y, z) { return planSet.has(`${x},${y},${z}`); }
+let added = 0, culled = 0;
+for (const p of blockPlan) {
+  // Surface block if any of 6 neighbors missing OR neighbor is above water surface
+  const surrounded =
+    neighborExists(p.x+1, p.y, p.z) && neighborExists(p.x-1, p.y, p.z) &&
+    neighborExists(p.x, p.y+1, p.z) && neighborExists(p.x, p.y-1, p.z) &&
+    neighborExists(p.x, p.y, p.z+1) && neighborExists(p.x, p.y, p.z-1);
+  if (surrounded) { culled++; continue; }
+  addBlock(p.x, p.y, p.z, p.type);
+  added++;
+}
+console.log(`[terrain] added=${added} culled=${culled}`);
+
+// scatter trees (only on grass, never in water)
+let treeAttempts = 0, treesPlaced = 0;
+while (treesPlaced < 12 && treeAttempts < 80) {
+  treeAttempts++;
   const tx = Math.floor((Math.random()*2-1) * (SIZE-3));
   const tz = Math.floor((Math.random()*2-1) * (SIZE-3));
-  // find ground height
-  let gy = 10;
-  while (gy > -3 && !world.has(key(tx, gy, tz))) gy--;
-  const baseY = gy + 1;
-  for (let t = 0; t < 4; t++) addBlock(tx, baseY + t, tz, 3); // trunk
+  const h = heightmap.get(`${tx},${tz}`);
+  if (h === undefined || h <= SEA_LEVEL + 1) continue; // no trees on sand/underwater
+  const baseY = h + 1;
+  for (let t = 0; t < 4; t++) addBlock(tx, baseY + t, tz, 3);
   for (let dy = 3; dy <= 5; dy++) {
     const r = dy === 5 ? 1 : 2;
     for (let dx = -r; dx <= r; dx++) {
@@ -170,7 +265,100 @@ for (let i = 0; i < 15; i++) {
       }
     }
   }
+  treesPlaced++;
 }
+
+// ---------- water surface (single plane with animated shader) ----------
+const waterUniforms = {
+  uTime:       { value: 0 },
+  uShallow:    { value: new THREE.Color(0x4fb3d9) },
+  uDeep:       { value: new THREE.Color(0x0e3a5c) },
+  uFoam:       { value: new THREE.Color(0xe8f6ff) },
+  uSunDir:     { value: sun.position.clone().normalize() },
+  uSunColor:   { value: new THREE.Color(0xfff1d6) },
+};
+const waterGeo = new THREE.PlaneGeometry((SIZE*2+2), (SIZE*2+2), 80, 80);
+waterGeo.rotateX(-Math.PI/2);
+const waterMat = new THREE.ShaderMaterial({
+  uniforms: waterUniforms,
+  transparent: true,
+  side: THREE.DoubleSide,
+  vertexShader: `
+    uniform float uTime;
+    varying vec3 vWorld;
+    varying vec3 vNormal;
+    varying float vWaveH;
+
+    // simple multi-octave sine waves
+    float wave(vec2 p, float t) {
+      float w =  sin(p.x * 0.65 + t * 1.4) * 0.10;
+      w     +=  sin(p.y * 0.55 - t * 1.1) * 0.09;
+      w     +=  sin((p.x + p.y) * 0.30 + t * 0.8) * 0.07;
+      w     +=  sin((p.x - p.y) * 0.45 - t * 1.6) * 0.05;
+      return w;
+    }
+
+    void main() {
+      vec4 wp = modelMatrix * vec4(position, 1.0);
+      float h = wave(wp.xz, uTime);
+      wp.y += h;
+      vWaveH = h;
+
+      // analytic-ish normal via partial derivatives (finite difference)
+      float e = 0.5;
+      float hx1 = wave(wp.xz + vec2(e, 0.0), uTime);
+      float hx0 = wave(wp.xz - vec2(e, 0.0), uTime);
+      float hz1 = wave(wp.xz + vec2(0.0, e), uTime);
+      float hz0 = wave(wp.xz - vec2(0.0, e), uTime);
+      vec3 n = normalize(vec3(hx0 - hx1, 2.0 * e, hz0 - hz1));
+      vNormal = n;
+      vWorld = wp.xyz;
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }
+  `,
+  fragmentShader: `
+    uniform float uTime;
+    uniform vec3 uShallow;
+    uniform vec3 uDeep;
+    uniform vec3 uFoam;
+    uniform vec3 uSunDir;
+    uniform vec3 uSunColor;
+    varying vec3 vWorld;
+    varying vec3 vNormal;
+    varying float vWaveH;
+
+    void main() {
+      vec3 V = normalize(cameraPosition - vWorld);
+      vec3 N = normalize(vNormal);
+      float fres = pow(1.0 - max(dot(N, V), 0.0), 3.5);
+
+      // base depth-ish blend: use wave height as a proxy for surface depth shading
+      float depthMix = smoothstep(-0.20, 0.20, vWaveH);
+      vec3 base = mix(uDeep, uShallow, depthMix);
+
+      // sun specular
+      vec3 H = normalize(uSunDir + V);
+      float spec = pow(max(dot(N, H), 0.0), 90.0) * 1.6;
+
+      // moving foam streaks via cheap noise-y sin
+      float foamPattern = sin(vWorld.x * 1.4 + uTime * 0.9)
+                       * sin(vWorld.z * 1.6 - uTime * 0.7);
+      float foam = smoothstep(0.55, 0.95, foamPattern) * 0.35;
+
+      vec3 col = mix(base, vec3(0.85, 0.95, 1.0), fres * 0.7);
+      col += uSunColor * spec;
+      col = mix(col, uFoam, foam);
+
+      // alpha: more opaque at grazing angle (fresnel), less when looking down
+      float alpha = mix(0.65, 0.92, fres);
+      gl_FragColor = vec4(col, alpha);
+    }
+  `,
+});
+const water = new THREE.Mesh(waterGeo, waterMat);
+water.position.set(0, SEA_LEVEL + 0.5, 0);
+water.receiveShadow = true; // accepts shadows from terrain
+scene.add(water);
 
 // ---------- player ----------
 const player = {
@@ -184,7 +372,7 @@ const player = {
 const keys = {};
 addEventListener('keydown', e => {
   keys[e.code] = true;
-  if (e.code >= 'Digit1' && e.code <= 'Digit5') {
+  if (e.code >= 'Digit1' && e.code <= 'Digit6') {
     activeBlock = parseInt(e.code.slice(5)) - 1;
     updateBar();
   }
@@ -213,7 +401,6 @@ function blockAt(x, y, z) {
   return world.has(key(Math.floor(x), Math.floor(y), Math.floor(z)));
 }
 function collides(p) {
-  // AABB vs voxels around player
   const minX = Math.floor(p.x - player.radius);
   const maxX = Math.floor(p.x + player.radius);
   const minY = Math.floor(p.y - player.height + 0.01);
@@ -238,14 +425,11 @@ addEventListener('mousedown', e => {
   if (!hits.length) return;
   const hit = hits[0];
   if (e.button === 0) {
-    // break
     removeBlock(hit.object);
   } else if (e.button === 2) {
-    // place — offset along face normal
     const n = hit.face.normal;
     const p = hit.object.position;
     const x = p.x + n.x, y = p.y + n.y, z = p.z + n.z;
-    // don't place inside player
     const dx = x + 0.5 - player.pos.x;
     const dz = z + 0.5 - player.pos.z;
     const dy = y + 0.5 - (player.pos.y - player.height/2);
@@ -275,10 +459,11 @@ updateBar();
 
 // ---------- main loop ----------
 const clock = new THREE.Clock();
+let elapsed = 0;
 function animate() {
   const dt = Math.min(clock.getDelta(), 0.05);
+  elapsed += dt;
 
-  // input → movement
   const speed = 5;
   const fwd = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
   const right = new THREE.Vector3(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
@@ -292,11 +477,9 @@ function animate() {
   player.vel.x = move.x;
   player.vel.z = move.z;
 
-  // gravity + jump
   player.vel.y -= 22 * dt;
   if (keys['Space'] && player.onGround) { player.vel.y = 8; player.onGround = false; }
 
-  // axis-separated collision
   const newPos = player.pos.clone();
   const tryAxis = (axis) => {
     newPos[axis] += player.vel[axis] * dt;
@@ -313,19 +496,28 @@ function animate() {
   tryAxis('x'); tryAxis('z'); tryAxis('y');
   player.pos.copy(newPos);
 
-  // safety net: don't fall forever
   if (player.pos.y < -20) { player.pos.set(0, 15, 0); player.vel.set(0,0,0); }
 
-  // camera at eye height
   camera.position.copy(player.pos);
   camera.rotation.order = 'YXZ';
   camera.rotation.y = player.yaw;
   camera.rotation.x = player.pitch;
 
+  // sun follows player on XZ so shadow camera always covers the action
+  sun.position.set(player.pos.x + 40, player.pos.y + 70, player.pos.z + 25);
+  sun.target.position.set(player.pos.x, 0, player.pos.z);
+  sun.target.updateMatrixWorld();
+
+  // animate water
+  waterUniforms.uTime.value = elapsed;
+
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
 animate();
+
+// expose for QA
+window.__voxel = { scene, camera, renderer, world, water, sun, player };
 </script>
 </body>
 </html>
