@@ -2,141 +2,209 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Water Physics Sim — vibe-tools</title>
+<title>Fluid Simulator (PIC/FLIP) — vibe-tools</title>
 <style>
   * { box-sizing: border-box; }
   body {
     margin: 0; font-family: system-ui, -apple-system, sans-serif;
-    background: linear-gradient(180deg, #0d1b2a 0%, #1b263b 100%);
-    color: #e0e1dd; min-height: 100vh; display: flex;
+    background: #050a14; color: #e0e1dd;
+    min-height: 100vh; display: flex; overflow: hidden;
   }
   #sidebar {
-    width: 280px; background: rgba(0,0,0,0.35); padding: 20px;
-    border-right: 1px solid rgba(255,255,255,0.1); overflow-y: auto;
+    width: 280px; background: rgba(0,0,0,0.45); padding: 18px;
+    border-right: 1px solid rgba(255,255,255,0.08);
+    overflow-y: auto; height: 100vh;
   }
-  #sidebar h1 { margin: 0 0 4px; font-size: 18px; }
-  #sidebar p.sub { margin: 0 0 18px; font-size: 12px; opacity: 0.6; }
-  .ctrl { margin-bottom: 14px; }
+  #sidebar h1 { margin: 8px 0 2px; font-size: 17px; }
+  #sidebar p.sub { margin: 0 0 16px; font-size: 11px; opacity: 0.55; }
+  .ctrl { margin-bottom: 12px; }
   .ctrl label {
-    display: flex; justify-content: space-between; font-size: 12px;
-    margin-bottom: 4px; opacity: 0.85;
+    display: flex; justify-content: space-between; font-size: 11px;
+    margin-bottom: 3px; opacity: 0.85;
   }
   .ctrl label span.v { color: #4cc9f0; font-family: monospace; }
   .ctrl input[type=range] { width: 100%; }
-  .row { display: flex; gap: 6px; margin-top: 10px; }
+  .row { display: flex; gap: 5px; margin-top: 8px; flex-wrap: wrap; }
   button {
-    flex: 1; padding: 8px; background: #415a77; color: white;
-    border: 1px solid #778da9; border-radius: 4px; cursor: pointer;
-    font-size: 12px;
+    flex: 1 1 auto; min-width: 0; padding: 7px; background: #1d3557;
+    color: white; border: 1px solid #457b9d; border-radius: 4px;
+    cursor: pointer; font-size: 11px;
   }
-  button:hover { background: #778da9; }
-  button.primary { background: #4cc9f0; color: #0d1b2a; border-color: #4cc9f0; }
+  button:hover { background: #457b9d; }
+  button.primary { background: #4cc9f0; color: #050a14; border-color: #4cc9f0; font-weight: 600; }
   button.primary:hover { background: #72e0ff; }
+  button.active { background: #f72585; border-color: #f72585; color: white; }
   #stats {
-    margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.1);
-    font-size: 11px; font-family: monospace; opacity: 0.75; line-height: 1.7;
+    margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.08);
+    font-size: 10px; font-family: monospace; opacity: 0.7; line-height: 1.7;
   }
   .hint {
-    margin-top: 16px; padding: 10px; background: rgba(76,201,240,0.1);
-    border-left: 3px solid #4cc9f0; font-size: 11px; line-height: 1.5;
+    margin-top: 14px; padding: 10px; background: rgba(76,201,240,0.08);
+    border-left: 3px solid #4cc9f0; font-size: 10px; line-height: 1.5;
   }
   #stage { flex: 1; position: relative; }
-  canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
-  a.back { color: #4cc9f0; font-size: 12px; text-decoration: none; }
+  canvas { display: block; position: absolute; top: 0; left: 0; }
+  #cv { cursor: crosshair; }
+  a.back { color: #4cc9f0; font-size: 11px; text-decoration: none; }
   a.back:hover { text-decoration: underline; }
+  details { margin-bottom: 10px; }
+  details summary { font-size: 11px; opacity: 0.7; cursor: pointer; padding: 4px 0; }
+  details[open] summary { opacity: 1; }
 </style>
 </head>
 <body>
 <div id="sidebar">
   <a class="back" href="index.html">← back</a>
-  <h1 style="margin-top:8px">Water Physics</h1>
-  <p class="sub">SPH-style particle fluid (2D)</p>
+  <h1>Fluid Simulator</h1>
+  <p class="sub">PIC/FLIP hybrid + surface render</p>
 
   <div class="ctrl">
-    <label>Gravity <span class="v" id="vg">800</span></label>
-    <input type="range" id="gravity" min="0" max="2500" value="800">
+    <label>Gravity <span class="v" id="vGravity">9.8</span></label>
+    <input type="range" id="gravity" min="-30" max="30" value="9.8" step="0.5">
   </div>
   <div class="ctrl">
-    <label>Viscosity <span class="v" id="vv">0.30</span></label>
-    <input type="range" id="viscosity" min="0" max="200" value="30">
+    <label>FLIP ratio <span class="v" id="vFlip">0.97</span></label>
+    <input type="range" id="flip" min="0" max="100" value="97">
   </div>
   <div class="ctrl">
-    <label>Damping <span class="v" id="vd">0.98</span></label>
-    <input type="range" id="damping" min="80" max="100" value="98">
+    <label>Viscosity <span class="v" id="vVisc">0.00</span></label>
+    <input type="range" id="visc" min="0" max="100" value="0">
   </div>
   <div class="ctrl">
-    <label>Pressure <span class="v" id="vp">800</span></label>
-    <input type="range" id="pressure" min="100" max="3000" value="800">
+    <label>Particles <span class="v" id="vCount">2400</span></label>
+    <input type="range" id="count" min="500" max="6000" step="100" value="4000">
   </div>
   <div class="ctrl">
-    <label>Particle radius <span class="v" id="vr">14</span></label>
-    <input type="range" id="radius" min="8" max="28" value="14">
+    <label>Solver iters <span class="v" id="vIters">40</span></label>
+    <input type="range" id="iters" min="10" max="120" value="40">
   </div>
-  <div class="ctrl">
-    <label>Particle count <span class="v" id="vc">350</span></label>
-    <input type="range" id="count" min="50" max="1200" value="350">
-  </div>
+
+  <details open>
+    <summary>Render</summary>
+    <div class="ctrl">
+      <label>Surface threshold <span class="v" id="vThresh">0.85</span></label>
+      <input type="range" id="thresh" min="10" max="200" value="85">
+    </div>
+    <div class="ctrl">
+      <label>Refraction <span class="v" id="vRefr">8</span></label>
+      <input type="range" id="refr" min="0" max="30" value="8">
+    </div>
+  </details>
 
   <div class="row">
     <button id="reset">Reset</button>
-    <button class="primary" id="splash">Splash</button>
+    <button id="splash">Splash</button>
   </div>
   <div class="row">
-    <button id="pause">Pause</button>
-    <button id="gravswap">⇅ Flip G</button>
+    <button class="primary" id="pause">Pause</button>
+    <button id="step1">Step</button>
+  </div>
+  <div class="row">
+    <button id="modeForce" class="active">Push/Pull</button>
+    <button id="modeWall">Paint Wall</button>
+    <button id="modeErase">Erase</button>
+  </div>
+  <div class="row">
+    <button id="clearWalls">Clear Walls</button>
   </div>
 
   <div class="hint">
-    <b>Click + drag</b> to push fluid<br>
-    <b>Shift + drag</b> to pull
+    <b>Push/Pull</b>: drag to push, Shift+drag to pull<br>
+    <b>Paint Wall</b>: drag to draw obstacles<br>
+    <b>Erase</b>: drag to remove walls
   </div>
 
   <div id="stats">
     fps: <span id="fps">—</span><br>
-    particles: <span id="np">—</span>
+    particles: <span id="np">—</span><br>
+    grid: <span id="grid">—</span>
   </div>
 </div>
 
 <div id="stage">
+  <canvas id="bg"></canvas>
   <canvas id="cv"></canvas>
 </div>
 
 <script>
-const cv = document.getElementById('cv');
-const ctx = cv.getContext('2d');
-let W = 0, H = 0;
-function resize() {
-  const r = cv.getBoundingClientRect();
-  W = cv.width = r.width * devicePixelRatio;
-  H = cv.height = r.height * devicePixelRatio;
-  ctx.scale(1, 1);
-}
-addEventListener('resize', resize);
-resize();
+// ============================================================
+// PIC/FLIP fluid sim with MAC grid + pressure projection
+// ============================================================
 
-// ---------- params (live-bound to sliders) ----------
+const cv = document.getElementById('cv');
+const bg = document.getElementById('bg');
+const ctx = cv.getContext('2d');
+const bctx = bg.getContext('2d');
+
+let W = 0, H = 0;
+const CELL = 16; // pixel size of one grid cell (display)
+let GW = 0, GH = 0; // grid dims in cells
+
+// ---- MAC grid ----
+// u: horizontal velocity at vertical edges, size (GW+1) x GH
+// v: vertical velocity at horizontal edges,   size GW x (GH+1)
+// p: pressure at cell centers, size GW x GH
+// type: 0=fluid, 1=air, 2=solid
+let u, uPrev, uW;     // uW = sum of weights for FLIP
+let v, vPrev, vW;
+let cellType;         // GW*GH
+let cellWalls;        // user-painted walls (persistent)
+let density;          // GW*GH for surface render
+
+function resize() {
+  const r = document.getElementById('stage').getBoundingClientRect();
+  const dpr = Math.min(devicePixelRatio, 2);
+  W = Math.floor(r.width);
+  H = Math.floor(r.height);
+  cv.width = bg.width = W * dpr;
+  cv.height = bg.height = H * dpr;
+  cv.style.width = bg.style.width = W + 'px';
+  cv.style.height = bg.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  bctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  GW = Math.floor(W / CELL);
+  GH = Math.floor(H / CELL);
+
+  u  = new Float32Array((GW+1) * GH);
+  uPrev = new Float32Array((GW+1) * GH);
+  uW = new Float32Array((GW+1) * GH);
+  v  = new Float32Array(GW * (GH+1));
+  vPrev = new Float32Array(GW * (GH+1));
+  vW = new Float32Array(GW * (GH+1));
+  cellType = new Uint8Array(GW * GH);
+  if (!cellWalls || cellWalls.length !== GW*GH) cellWalls = new Uint8Array(GW*GH);
+  density = new Float32Array(GW * GH);
+
+  document.getElementById('grid').textContent = `${GW}×${GH}`;
+  drawBackground();
+}
+addEventListener('resize', () => { resize(); initParticles(); });
+
+const idxU = (i, j) => i + (GW+1) * j;
+const idxV = (i, j) => i + GW * j;
+const idxC = (i, j) => i + GW * j;
+
+// ---- params ----
 const P = {
-  gravity: 800, viscosity: 0.30, damping: 0.98,
-  pressure: 800, radius: 14, count: 350,
-  paused: false,
+  gravity: 9.8, flip: 0.97, visc: 0.0, count: 2400,
+  iters: 40, thresh: 0.45, refr: 8,
+  paused: false, mode: 'force',
 };
 
-function bind(id, key, fmt, parse) {
+function bind(id, key, parse, fmt) {
   const el = document.getElementById(id);
-  const out = document.getElementById('v' + id[0]);
-  const update = () => {
-    P[key] = parse(+el.value);
-    out.textContent = fmt(P[key]);
-  };
-  el.addEventListener('input', update);
-  update();
+  const out = document.getElementById('v' + id[0].toUpperCase() + id.slice(1));
+  const upd = () => { P[key] = parse(+el.value); out.textContent = fmt(P[key]); };
+  el.addEventListener('input', upd); upd();
 }
-bind('gravity',   'gravity',   v => v.toFixed(0),   v => v);
-bind('viscosity', 'viscosity', v => v.toFixed(2),   v => v / 100);
-bind('damping',   'damping',   v => v.toFixed(2),   v => v / 100);
-bind('pressure',  'pressure',  v => v.toFixed(0),   v => v);
-bind('radius',    'radius',    v => v.toFixed(0),   v => v);
-bind('count',     'count',     v => v.toFixed(0),   v => v);
+bind('gravity','gravity',v=>v,v=>v.toFixed(1));
+bind('flip','flip',v=>v/100,v=>v.toFixed(2));
+bind('visc','visc',v=>v/200,v=>v.toFixed(2));
+bind('count','count',v=>v,v=>v.toFixed(0));
+bind('iters','iters',v=>v,v=>v.toFixed(0));
+bind('thresh','thresh',v=>v/100,v=>v.toFixed(2));
+bind('refr','refr',v=>v,v=>v.toFixed(0));
 
 document.getElementById('count').addEventListener('change', () => initParticles());
 document.getElementById('reset').addEventListener('click', () => initParticles());
@@ -144,174 +212,628 @@ document.getElementById('splash').addEventListener('click', () => splash());
 document.getElementById('pause').addEventListener('click', e => {
   P.paused = !P.paused; e.target.textContent = P.paused ? 'Resume' : 'Pause';
 });
-document.getElementById('gravswap').addEventListener('click', () => P.gravity = -P.gravity);
+document.getElementById('step1').addEventListener('click', () => { if (P.paused) simStep(1/60); });
 
-// ---------- particles ----------
-let parts = [];
+const modeButtons = {
+  force: document.getElementById('modeForce'),
+  wall:  document.getElementById('modeWall'),
+  erase: document.getElementById('modeErase'),
+};
+function setMode(m) {
+  P.mode = m;
+  for (const k in modeButtons) modeButtons[k].classList.toggle('active', k === m);
+}
+modeButtons.force.addEventListener('click', () => setMode('force'));
+modeButtons.wall.addEventListener('click', () => setMode('wall'));
+modeButtons.erase.addEventListener('click', () => setMode('erase'));
+
+document.getElementById('clearWalls').addEventListener('click', () => {
+  cellWalls.fill(0); drawBackground();
+});
+
+// ---- particles ----
+let parts = []; // {x, y, vx, vy} in pixel coords
+
 function initParticles() {
   parts = [];
   const n = Math.floor(P.count);
-  const cols = Math.ceil(Math.sqrt(n * (W / H)));
+  // pack in a block in upper-left of the basin
+  const region = { x0: W * 0.08, y0: H * 0.08, x1: W * 0.55, y1: H * 0.65 };
+  const rw = region.x1 - region.x0, rh = region.y1 - region.y0;
+  const cols = Math.ceil(Math.sqrt(n * rw / rh));
   const rows = Math.ceil(n / cols);
-  const sp = P.radius * 1.6;
-  const startX = W * 0.3;
-  const startY = H * 0.2;
-  for (let i = 0; i < n; i++) {
-    const r = Math.floor(i / cols), c = i % cols;
-    parts.push({
-      x: startX + c * sp + (Math.random() - 0.5) * 2,
-      y: startY + r * sp + (Math.random() - 0.5) * 2,
-      vx: 0, vy: 0,
-    });
+  const sx = rw / cols, sy = rh / rows;
+  let k = 0;
+  for (let j = 0; j < rows && k < n; j++) {
+    for (let i = 0; i < cols && k < n; i++) {
+      parts.push({
+        x: region.x0 + (i + 0.5) * sx + (Math.random() - 0.5) * sx * 0.4,
+        y: region.y0 + (j + 0.5) * sy + (Math.random() - 0.5) * sy * 0.4,
+        vx: 0, vy: 0,
+      });
+      k++;
+    }
   }
 }
+
 function splash() {
-  for (let i = 0; i < 80; i++) {
+  for (let i = 0; i < 200; i++) {
     parts.push({
       x: W / 2 + (Math.random() - 0.5) * 80,
-      y: H * 0.15 + (Math.random() - 0.5) * 30,
+      y: H * 0.12 + (Math.random() - 0.5) * 30,
       vx: (Math.random() - 0.5) * 200,
-      vy: (Math.random() - 0.5) * 200,
+      vy: 100 + Math.random() * 200,
     });
   }
 }
-initParticles();
 
-// ---------- mouse interaction ----------
-let mouse = { x: 0, y: 0, down: false, shift: false };
-cv.addEventListener('mousedown', e => { mouse.down = true; mouse.shift = e.shiftKey; updateMouse(e); });
-cv.addEventListener('mousemove', e => updateMouse(e));
+// ---- mouse ----
+let mouse = { x: 0, y: 0, px: 0, py: 0, down: false, shift: false };
+cv.addEventListener('mousedown', e => {
+  mouse.down = true; mouse.shift = e.shiftKey;
+  updateMouse(e); mouse.px = mouse.x; mouse.py = mouse.y;
+});
+cv.addEventListener('mousemove', e => {
+  mouse.px = mouse.x; mouse.py = mouse.y;
+  updateMouse(e);
+  if (mouse.down && (P.mode === 'wall' || P.mode === 'erase')) paintWalls();
+});
 addEventListener('mouseup', () => mouse.down = false);
 function updateMouse(e) {
   const r = cv.getBoundingClientRect();
-  mouse.x = (e.clientX - r.left) * devicePixelRatio;
-  mouse.y = (e.clientY - r.top) * devicePixelRatio;
+  mouse.x = e.clientX - r.left;
+  mouse.y = e.clientY - r.top;
   mouse.shift = e.shiftKey;
 }
 
-// ---------- spatial grid ----------
-function buildGrid(cell) {
-  const g = new Map();
-  for (let i = 0; i < parts.length; i++) {
-    const p = parts[i];
-    const k = (Math.floor(p.x / cell)) + ',' + (Math.floor(p.y / cell));
-    let arr = g.get(k);
-    if (!arr) { arr = []; g.set(k, arr); }
-    arr.push(i);
+function paintWalls() {
+  const radius = 2;
+  const ci = Math.floor(mouse.x / CELL);
+  const cj = Math.floor(mouse.y / CELL);
+  const val = P.mode === 'wall' ? 1 : 0;
+  for (let dj = -radius; dj <= radius; dj++) {
+    for (let di = -radius; di <= radius; di++) {
+      const i = ci + di, j = cj + dj;
+      if (i < 1 || i >= GW-1 || j < 1 || j >= GH-1) continue;
+      if (di*di + dj*dj > radius*radius) continue;
+      cellWalls[idxC(i,j)] = val;
+    }
   }
-  return g;
+  drawBackground();
 }
 
-// ---------- physics step ----------
-function step(dt) {
-  const r = P.radius;
-  const r2 = r * r;
-  const cell = r;
-  const grid = buildGrid(cell);
+// ============================================================
+// SIM STEP
+// ============================================================
 
-  // density / pressure forces (simplified SPH-ish)
-  for (let i = 0; i < parts.length; i++) {
-    const p = parts[i];
-    const cx = Math.floor(p.x / cell), cy = Math.floor(p.y / cell);
-    let fx = 0, fy = 0;
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dy = -1; dy <= 1; dy++) {
-        const arr = grid.get((cx + dx) + ',' + (cy + dy));
-        if (!arr) continue;
-        for (const j of arr) {
-          if (j === i) continue;
-          const q = parts[j];
-          const ddx = p.x - q.x, ddy = p.y - q.y;
-          const d2 = ddx*ddx + ddy*ddy;
-          if (d2 >= r2 || d2 < 0.0001) continue;
-          const d = Math.sqrt(d2);
-          const overlap = (r - d) / r;
-          // pressure repulsion
-          const fmag = P.pressure * overlap * overlap;
-          fx += (ddx / d) * fmag;
-          fy += (ddy / d) * fmag;
-          // viscosity (velocity sharing)
-          const vdx = q.vx - p.vx, vdy = q.vy - p.vy;
-          fx += vdx * P.viscosity * overlap;
-          fy += vdy * P.viscosity * overlap;
+function classifyCells() {
+  // start as air, then walls, then mark fluid where particles live
+  for (let i = 0; i < cellType.length; i++) {
+    cellType[i] = cellWalls[i] ? 2 : 1;
+  }
+  // border = solid
+  for (let i = 0; i < GW; i++) { cellType[idxC(i,0)] = 2; cellType[idxC(i,GH-1)] = 2; }
+  for (let j = 0; j < GH; j++) { cellType[idxC(0,j)] = 2; cellType[idxC(GW-1,j)] = 2; }
+  for (const p of parts) {
+    const i = Math.floor(p.x / CELL);
+    const j = Math.floor(p.y / CELL);
+    if (i > 0 && i < GW-1 && j > 0 && j < GH-1) {
+      if (cellType[idxC(i,j)] !== 2) cellType[idxC(i,j)] = 0;
+    }
+  }
+}
+
+// transfer particle velocities → grid (using bilinear weights)
+function p2g() {
+  u.fill(0); uW.fill(0);
+  v.fill(0); vW.fill(0);
+
+  for (const p of parts) {
+    // u-component lives at (i*CELL, (j+0.5)*CELL)
+    {
+      const fx = p.x / CELL;
+      const fy = p.y / CELL - 0.5;
+      const i = Math.floor(fx), j = Math.floor(fy);
+      const tx = fx - i, ty = fy - j;
+      if (i >= 0 && i < GW && j >= 0 && j < GH) {
+        const w00 = (1-tx)*(1-ty), w10 = tx*(1-ty), w01 = (1-tx)*ty, w11 = tx*ty;
+        u[idxU(i,   j)]   += p.vx * w00; uW[idxU(i,   j)]   += w00;
+        u[idxU(i+1, j)]   += p.vx * w10; uW[idxU(i+1, j)]   += w10;
+        if (j+1 < GH) {
+          u[idxU(i,   j+1)] += p.vx * w01; uW[idxU(i,   j+1)] += w01;
+          u[idxU(i+1, j+1)] += p.vx * w11; uW[idxU(i+1, j+1)] += w11;
         }
       }
     }
-    p.vx += fx * dt;
-    p.vy += fy * dt;
-  }
-
-  // gravity + mouse force
-  for (const p of parts) {
-    p.vy += P.gravity * dt;
-    if (mouse.down) {
-      const dx = mouse.x - p.x, dy = mouse.y - p.y;
-      const d = Math.sqrt(dx*dx + dy*dy) + 1;
-      if (d < 200) {
-        const f = mouse.shift ? 1500 : -1500; // shift = pull, normal = push
-        const fall = (1 - d / 200);
-        p.vx += (dx / d) * f * fall * dt;
-        p.vy += (dy / d) * f * fall * dt;
+    // v-component at ((i+0.5)*CELL, j*CELL)
+    {
+      const fx = p.x / CELL - 0.5;
+      const fy = p.y / CELL;
+      const i = Math.floor(fx), j = Math.floor(fy);
+      const tx = fx - i, ty = fy - j;
+      if (i >= 0 && i < GW && j >= 0 && j < GH) {
+        const w00 = (1-tx)*(1-ty), w10 = tx*(1-ty), w01 = (1-tx)*ty, w11 = tx*ty;
+        v[idxV(i,   j)]   += p.vy * w00; vW[idxV(i,   j)]   += w00;
+        if (i+1 < GW) {
+          v[idxV(i+1, j)]   += p.vy * w10; vW[idxV(i+1, j)]   += w10;
+        }
+        v[idxV(i,   j+1)] += p.vy * w01; vW[idxV(i,   j+1)] += w01;
+        if (i+1 < GW) {
+          v[idxV(i+1, j+1)] += p.vy * w11; vW[idxV(i+1, j+1)] += w11;
+        }
       }
     }
   }
 
-  // integrate + walls
-  for (const p of parts) {
-    p.vx *= P.damping;
-    p.vy *= P.damping;
-    p.x += p.vx * dt;
-    p.y += p.vy * dt;
-    const m = P.radius / 2;
-    if (p.x < m) { p.x = m; p.vx *= -0.4; }
-    if (p.x > W - m) { p.x = W - m; p.vx *= -0.4; }
-    if (p.y < m) { p.y = m; p.vy *= -0.4; }
-    if (p.y > H - m) { p.y = H - m; p.vy *= -0.4; }
+  for (let i = 0; i < u.length; i++) if (uW[i] > 0) u[i] /= uW[i];
+  for (let i = 0; i < v.length; i++) if (vW[i] > 0) v[i] /= vW[i];
+
+  uPrev.set(u);
+  vPrev.set(v);
+}
+
+function applyForces(dt) {
+  // gravity on v
+  for (let j = 0; j <= GH; j++) {
+    for (let i = 0; i < GW; i++) {
+      v[idxV(i,j)] += P.gravity * dt * 60; // scale to grid units
+    }
+  }
+  // optional viscosity (simple velocity smoothing)
+  if (P.visc > 0) {
+    const k = Math.min(P.visc, 0.45);
+    const uTmp = u.slice(), vTmp = v.slice();
+    for (let j = 1; j < GH-1; j++) {
+      for (let i = 1; i < GW; i++) {
+        const c = idxU(i,j);
+        uTmp[c] = u[c] + k * ((u[c-1] + u[c+1] + u[c-(GW+1)] + u[c+(GW+1)]) * 0.25 - u[c]);
+      }
+    }
+    for (let j = 1; j < GH; j++) {
+      for (let i = 1; i < GW-1; i++) {
+        const c = idxV(i,j);
+        vTmp[c] = v[c] + k * ((v[c-1] + v[c+1] + v[c-GW] + v[c+GW]) * 0.25 - v[c]);
+      }
+    }
+    u.set(uTmp); v.set(vTmp);
   }
 }
 
-// ---------- render ----------
-function draw() {
-  // bg
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, '#0d1b2a');
-  g.addColorStop(1, '#1b263b');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
-
-  // metaball-ish: glow + solid
-  ctx.globalCompositeOperation = 'lighter';
-  for (const p of parts) {
-    const r = P.radius;
-    const grd = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
-    grd.addColorStop(0, 'rgba(76,201,240,0.85)');
-    grd.addColorStop(0.6, 'rgba(67,97,238,0.35)');
-    grd.addColorStop(1, 'rgba(67,97,238,0)');
-    ctx.fillStyle = grd;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-    ctx.fill();
+function enforceSolidBoundary() {
+  // u on solid cell faces → 0
+  for (let j = 0; j < GH; j++) {
+    for (let i = 0; i < GW; i++) {
+      if (cellType[idxC(i,j)] === 2) {
+        u[idxU(i,j)] = 0;
+        u[idxU(i+1,j)] = 0;
+        v[idxV(i,j)] = 0;
+        v[idxV(i,j+1)] = 0;
+      }
+    }
   }
-  ctx.globalCompositeOperation = 'source-over';
+  // outermost border
+  for (let j = 0; j < GH; j++) { u[idxU(0,j)] = 0; u[idxU(GW,j)] = 0; }
+  for (let i = 0; i < GW; i++) { v[idxV(i,0)] = 0; v[idxV(i,GH)] = 0; }
+}
 
-  // mouse cursor halo
+// pressure projection (Gauss-Seidel SOR)
+function project() {
+  enforceSolidBoundary();
+  const overrelax = 1.9;
+  const iters = Math.floor(P.iters);
+  for (let it = 0; it < iters; it++) {
+    for (let j = 1; j < GH-1; j++) {
+      for (let i = 1; i < GW-1; i++) {
+        if (cellType[idxC(i,j)] !== 0) continue;
+        // count non-solid neighbours
+        const sL = cellType[idxC(i-1,j)] !== 2 ? 1 : 0;
+        const sR = cellType[idxC(i+1,j)] !== 2 ? 1 : 0;
+        const sU = cellType[idxC(i,j-1)] !== 2 ? 1 : 0;
+        const sD = cellType[idxC(i,j+1)] !== 2 ? 1 : 0;
+        const s = sL + sR + sU + sD;
+        if (s === 0) continue;
+        const div = (u[idxU(i+1,j)] - u[idxU(i,j)] + v[idxV(i,j+1)] - v[idxV(i,j)]);
+        const dp = -div / s * overrelax;
+        u[idxU(i,j)]   -= dp * sL;
+        u[idxU(i+1,j)] += dp * sR;
+        v[idxV(i,j)]   -= dp * sU;
+        v[idxV(i,j+1)] += dp * sD;
+      }
+    }
+  }
+}
+
+// transfer grid → particle (PIC + FLIP blend)
+function g2p() {
+  const flip = P.flip;
+  for (const p of parts) {
+    // sample u
+    const sampleU = (gx, gy) => {
+      const fx = gx, fy = gy - 0.5;
+      const i = Math.floor(fx), j = Math.floor(fy);
+      const tx = fx - i, ty = fy - j;
+      if (i < 0 || i >= GW || j < 0 || j >= GH-1) return 0;
+      const a = u[idxU(i,j)]   || 0;
+      const b = u[idxU(i+1,j)] || 0;
+      const c = u[idxU(i,j+1)] || 0;
+      const d = u[idxU(i+1,j+1)] || 0;
+      return (a*(1-tx)+b*tx)*(1-ty) + (c*(1-tx)+d*tx)*ty;
+    };
+    const sampleUprev = (gx, gy) => {
+      const fx = gx, fy = gy - 0.5;
+      const i = Math.floor(fx), j = Math.floor(fy);
+      const tx = fx - i, ty = fy - j;
+      if (i < 0 || i >= GW || j < 0 || j >= GH-1) return 0;
+      const a = uPrev[idxU(i,j)]   || 0;
+      const b = uPrev[idxU(i+1,j)] || 0;
+      const c = uPrev[idxU(i,j+1)] || 0;
+      const d = uPrev[idxU(i+1,j+1)] || 0;
+      return (a*(1-tx)+b*tx)*(1-ty) + (c*(1-tx)+d*tx)*ty;
+    };
+    const sampleV = (gx, gy) => {
+      const fx = gx - 0.5, fy = gy;
+      const i = Math.floor(fx), j = Math.floor(fy);
+      const tx = fx - i, ty = fy - j;
+      if (i < 0 || i >= GW-1 || j < 0 || j >= GH) return 0;
+      const a = v[idxV(i,j)]   || 0;
+      const b = v[idxV(i+1,j)] || 0;
+      const c = v[idxV(i,j+1)] || 0;
+      const d = v[idxV(i+1,j+1)] || 0;
+      return (a*(1-tx)+b*tx)*(1-ty) + (c*(1-tx)+d*tx)*ty;
+    };
+    const sampleVprev = (gx, gy) => {
+      const fx = gx - 0.5, fy = gy;
+      const i = Math.floor(fx), j = Math.floor(fy);
+      const tx = fx - i, ty = fy - j;
+      if (i < 0 || i >= GW-1 || j < 0 || j >= GH) return 0;
+      const a = vPrev[idxV(i,j)]   || 0;
+      const b = vPrev[idxV(i+1,j)] || 0;
+      const c = vPrev[idxV(i,j+1)] || 0;
+      const d = vPrev[idxV(i+1,j+1)] || 0;
+      return (a*(1-tx)+b*tx)*(1-ty) + (c*(1-tx)+d*tx)*ty;
+    };
+
+    const gx = p.x / CELL, gy = p.y / CELL;
+    const newU = sampleU(gx, gy), oldU = sampleUprev(gx, gy);
+    const newV = sampleV(gx, gy), oldV = sampleVprev(gx, gy);
+    // PIC: just use newU. FLIP: p.vx + (newU - oldU). Blend.
+    const picU = newU, flipU = p.vx + (newU - oldU);
+    const picV = newV, flipV = p.vy + (newV - oldV);
+    p.vx = picU * (1 - flip) + flipU * flip;
+    p.vy = picV * (1 - flip) + flipV * flip;
+  }
+}
+
+function advectParticles(dt) {
+  const scale = CELL; // grid→pixel
+  for (const p of parts) {
+    p.x += p.vx * dt * 60; // velocity is in pixels/sec-ish (already scaled)
+    p.y += p.vy * dt * 60;
+    // wall collisions (cell-level)
+    pushOutOfSolid(p);
+    // domain bounds (small inset)
+    if (p.x < CELL + 1)        { p.x = CELL + 1; if (p.vx < 0) p.vx = 0; }
+    if (p.x > W - CELL - 1)    { p.x = W - CELL - 1; if (p.vx > 0) p.vx = 0; }
+    if (p.y < CELL + 1)        { p.y = CELL + 1; if (p.vy < 0) p.vy = 0; }
+    if (p.y > H - CELL - 1)    { p.y = H - CELL - 1; if (p.vy > 0) p.vy = 0; }
+  }
+}
+
+function pushOutOfSolid(p) {
+  const i = Math.floor(p.x / CELL);
+  const j = Math.floor(p.y / CELL);
+  if (i <= 0 || i >= GW-1 || j <= 0 || j >= GH-1) return;
+  if (cellType[idxC(i,j)] !== 2) return;
+  // find nearest non-solid neighbour
+  const cx = (i + 0.5) * CELL, cy = (j + 0.5) * CELL;
+  const dx = p.x - cx, dy = p.y - cy;
+  if (Math.abs(dx) > Math.abs(dy)) {
+    p.x = dx > 0 ? (i+1)*CELL + 0.1 : i*CELL - 0.1;
+    p.vx *= -0.2;
+  } else {
+    p.y = dy > 0 ? (j+1)*CELL + 0.1 : j*CELL - 0.1;
+    p.vy *= -0.2;
+  }
+}
+
+function applyMouseForce(dt) {
+  if (!mouse.down || P.mode !== 'force') return;
+  const radius = 90;
+  const sign = mouse.shift ? -1 : 1;
+  const dragVx = (mouse.x - mouse.px) * 4;
+  const dragVy = (mouse.y - mouse.py) * 4;
+  for (const p of parts) {
+    const dx = p.x - mouse.x, dy = p.y - mouse.y;
+    const d = Math.sqrt(dx*dx + dy*dy);
+    if (d > radius) continue;
+    const fall = (1 - d / radius);
+    if (mouse.shift) {
+      // pull toward cursor
+      p.vx -= (dx) * 0.04 * fall;
+      p.vy -= (dy) * 0.04 * fall;
+    } else {
+      // push along drag direction + repel
+      p.vx += dragVx * fall * 0.02;
+      p.vy += dragVy * fall * 0.02;
+      if (d > 1) {
+        p.vx += (dx / d) * 200 * fall * dt * 60 * 0.4;
+        p.vy += (dy / d) * 200 * fall * dt * 60 * 0.4;
+      }
+    }
+  }
+}
+
+function simStep(dt) {
+  applyMouseForce(dt);
+  classifyCells();
+  p2g();
+  applyForces(dt);
+  project();
+  g2p();
+  advectParticles(dt);
+  pushParticlesApart(2);  // incompressibility correction
+}
+
+// Push particles apart so they don't collapse into a paper-thin layer
+// (PIC/FLIP needs particle-level incompressibility, separate from pressure projection)
+function pushParticlesApart(iters) {
+  const minDist = CELL * 0.55;
+  const minDist2 = minDist * minDist;
+  // spatial hash
+  const cs = CELL; // bucket = one grid cell
+  const cw = Math.ceil(W / cs), ch = Math.ceil(H / cs);
+  for (let it = 0; it < iters; it++) {
+    const buckets = new Map();
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      const bx = Math.floor(p.x / cs), by = Math.floor(p.y / cs);
+      const k = bx + by * cw;
+      let arr = buckets.get(k);
+      if (!arr) { arr = []; buckets.set(k, arr); }
+      arr.push(i);
+    }
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      const bx = Math.floor(p.x / cs), by = Math.floor(p.y / cs);
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const arr = buckets.get((bx+dx) + (by+dy)*cw);
+          if (!arr) continue;
+          for (const j of arr) {
+            if (j <= i) continue;
+            const q = parts[j];
+            const ddx = q.x - p.x, ddy = q.y - p.y;
+            const d2 = ddx*ddx + ddy*ddy;
+            if (d2 >= minDist2 || d2 < 1e-6) continue;
+            const d = Math.sqrt(d2);
+            const push = (minDist - d) * 0.5;
+            const nx = ddx / d, ny = ddy / d;
+            p.x -= nx * push; p.y -= ny * push;
+            q.x += nx * push; q.y += ny * push;
+          }
+        }
+      }
+    }
+    // re-clamp to bounds
+    for (const p of parts) {
+      if (p.x < CELL+1) p.x = CELL+1;
+      if (p.x > W-CELL-1) p.x = W-CELL-1;
+      if (p.y < CELL+1) p.y = CELL+1;
+      if (p.y > H-CELL-1) p.y = H-CELL-1;
+    }
+  }
+}
+
+// ============================================================
+// SURFACE RENDER
+// ============================================================
+function computeDensity() {
+  density.fill(0);
+  // splat each particle to a wider neighbourhood for smoother surface
+  const SR = 1.5; // splat radius in cells (tighter = clearer waterline)
+  const SR2 = SR * SR;
+  const span = Math.ceil(SR);
+  for (const p of parts) {
+    const fx = p.x / CELL, fy = p.y / CELL;
+    const ci = Math.floor(fx), cj = Math.floor(fy);
+    for (let dj = -span; dj <= span; dj++) {
+      for (let di = -span; di <= span; di++) {
+        const i = ci + di, j = cj + dj;
+        if (i < 0 || i >= GW || j < 0 || j >= GH) continue;
+        const dx = (i + 0.5) - fx, dy = (j + 0.5) - fy;
+        const d2 = dx*dx + dy*dy;
+        if (d2 > SR2) continue;
+        const k = 1 - d2 / SR2;
+        density[idxC(i,j)] += k * k;
+      }
+    }
+  }
+  // 2-pass blur for smoother surface
+  const tmp = new Float32Array(density.length);
+  for (let pass = 0; pass < 2; pass++) {
+    for (let j = 1; j < GH-1; j++) {
+      for (let i = 1; i < GW-1; i++) {
+        tmp[idxC(i,j)] = (
+          density[idxC(i-1,j)] + density[idxC(i+1,j)] +
+          density[idxC(i,j-1)] + density[idxC(i,j+1)] +
+          density[idxC(i,j)] * 2
+        ) / 6;
+      }
+    }
+    density.set(tmp);
+  }
+}
+
+// Render: bilinear sample density on pixel grid → mask, then composite water.
+// We use an offscreen image data with one pixel per CELL/2 step for speed.
+const RENDER_STEP = 4; // subsample
+let renderImg = null;
+
+function drawBackground() {
+  // basin + walls
+  bctx.fillStyle = '#050a14';
+  bctx.fillRect(0, 0, W, H);
+  // soft vignette gradient
+  const g = bctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, 'rgba(20,40,70,0.6)');
+  g.addColorStop(1, 'rgba(5,10,25,0.9)');
+  bctx.fillStyle = g; bctx.fillRect(0,0,W,H);
+
+  // border
+  bctx.strokeStyle = '#1d3557'; bctx.lineWidth = 2;
+  bctx.strokeRect(CELL, CELL, W - 2*CELL, H - 2*CELL);
+
+  // walls
+  bctx.fillStyle = '#3a5a78';
+  for (let j = 0; j < GH; j++) {
+    for (let i = 0; i < GW; i++) {
+      if (cellWalls[idxC(i,j)]) {
+        bctx.fillRect(i*CELL, j*CELL, CELL, CELL);
+      }
+    }
+  }
+  // wall highlight
+  bctx.fillStyle = 'rgba(255,255,255,0.06)';
+  for (let j = 0; j < GH; j++) {
+    for (let i = 0; i < GW; i++) {
+      if (cellWalls[idxC(i,j)]) {
+        bctx.fillRect(i*CELL, j*CELL, CELL, 2);
+      }
+    }
+  }
+}
+
+function sampleDensity(px, py) {
+  const fx = px / CELL - 0.5;
+  const fy = py / CELL - 0.5;
+  const i = Math.floor(fx), j = Math.floor(fy);
+  if (i < 0 || i >= GW-1 || j < 0 || j >= GH-1) return 0;
+  const tx = fx - i, ty = fy - j;
+  const a = density[idxC(i,j)];
+  const b = density[idxC(i+1,j)];
+  const c = density[idxC(i,j+1)];
+  const d = density[idxC(i+1,j+1)];
+  return (a*(1-tx)+b*tx)*(1-ty) + (c*(1-tx)+d*tx)*ty;
+}
+
+function render() {
+  computeDensity();
+
+  // clear top canvas
+  ctx.clearRect(0, 0, W, H);
+
+  // Build a low-res mask from density, then upscale with smoothing for surface.
+  const stepW = Math.ceil(W / RENDER_STEP);
+  const stepH = Math.ceil(H / RENDER_STEP);
+  if (!renderImg || renderImg.width !== stepW || renderImg.height !== stepH) {
+    renderImg = ctx.createImageData(stepW, stepH);
+  }
+  const data = renderImg.data;
+  const thresh = P.thresh;
+  const refr = P.refr;
+
+  // Pre-sample the background canvas pixel data once for refraction
+  // (cheaper to sample bg via drawImage with offset; but we want per-pixel offset)
+  // → trick: read bg ImageData at low res
+  const bgImg = bctx.getImageData(0, 0, bg.width, bg.height);
+  const bgW = bg.width, bgH = bg.height, dpr = bg.width / W;
+
+  for (let py = 0; py < stepH; py++) {
+    for (let px = 0; px < stepW; px++) {
+      const x = px * RENDER_STEP, y = py * RENDER_STEP;
+      const d = sampleDensity(x, y);
+      const idx = (py * stepW + px) * 4;
+      if (d < thresh * 0.5) {
+        data[idx] = 0; data[idx+1] = 0; data[idx+2] = 0; data[idx+3] = 0;
+        continue;
+      }
+      // surface "depth" = how far past threshold
+      const dn = (d - thresh * 0.5) / (1.0 - thresh * 0.5);
+      // gradient (for normal & refraction)
+      const dxD = sampleDensity(x + RENDER_STEP, y) - sampleDensity(x - RENDER_STEP, y);
+      const dyD = sampleDensity(x, y + RENDER_STEP) - sampleDensity(x, y - RENDER_STEP);
+
+      // refraction: offset bg sample by gradient
+      const sxBg = Math.floor((x + dxD * refr) * dpr);
+      const syBg = Math.floor((y + dyD * refr) * dpr);
+      let r = 12, g = 24, b = 50;
+      if (sxBg >= 0 && sxBg < bgW && syBg >= 0 && syBg < bgH) {
+        const bi = (syBg * bgW + sxBg) * 4;
+        r = bgImg.data[bi];
+        g = bgImg.data[bi+1];
+        b = bgImg.data[bi+2];
+      }
+
+      // tint with water color (stronger blend for clearer waterline)
+      const tint = (Math.min(1, dn));
+      const wr = 70, wg = 165, wb = 230;
+      r = r * (1 - tint*0.85) + wr * tint*0.85;
+      g = g * (1 - tint*0.85) + wg * tint*0.85;
+      b = b * (1 - tint*0.85) + wb * tint*0.85;
+
+      // specular highlight from gradient pointing up-left
+      const lx = -0.6, ly = -0.8;
+      const gn = Math.sqrt(dxD*dxD + dyD*dyD) + 1e-6;
+      const nx = dxD / gn, ny = dyD / gn;
+      const spec = Math.max(0, nx*lx + ny*ly);
+      const specPow = Math.pow(spec, 8) * 200;
+      r = Math.min(255, r + specPow);
+      g = Math.min(255, g + specPow);
+      b = Math.min(255, b + specPow);
+
+      // edge brightening (foam-ish)
+      if (d < thresh) {
+        const edge = 1 - (d - thresh*0.5) / (thresh*0.5);
+        r = r * (1-edge*0.4) + 220 * edge*0.4;
+        g = g * (1-edge*0.4) + 240 * edge*0.4;
+        b = b * (1-edge*0.4) + 255 * edge*0.4;
+      }
+
+      data[idx] = r; data[idx+1] = g; data[idx+2] = b;
+      data[idx+3] = Math.min(255, dn * 380 + 60);
+    }
+  }
+
+  // Blit at low res to a temp canvas, then drawImage with smoothing for upscale
+  if (!render._tmp) {
+    render._tmp = document.createElement('canvas');
+    render._tctx = render._tmp.getContext('2d');
+  }
+  if (render._tmp.width !== stepW || render._tmp.height !== stepH) {
+    render._tmp.width = stepW;
+    render._tmp.height = stepH;
+  }
+  render._tctx.putImageData(renderImg, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(render._tmp, 0, 0, W, H);
+
+  // mouse cursor
   if (mouse.down) {
-    ctx.strokeStyle = mouse.shift ? 'rgba(255,200,100,0.6)' : 'rgba(255,255,255,0.5)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(mouse.x, mouse.y, 200, 0, Math.PI * 2);
-    ctx.stroke();
+    if (P.mode === 'force') {
+      ctx.strokeStyle = mouse.shift ? 'rgba(255,200,100,0.5)' : 'rgba(255,255,255,0.4)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(mouse.x, mouse.y, 90, 0, Math.PI*2); ctx.stroke();
+    } else {
+      ctx.strokeStyle = P.mode === 'wall' ? 'rgba(247,37,133,0.7)' : 'rgba(76,201,240,0.7)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(mouse.x, mouse.y, 2.5*CELL, 0, Math.PI*2); ctx.stroke();
+    }
   }
 }
 
-// ---------- main loop ----------
+// ============================================================
+// MAIN LOOP
+// ============================================================
+resize();
+initParticles();
+
 let last = performance.now();
 let fpsAcc = 0, fpsN = 0, fpsLast = last;
 function loop(now) {
   const dt = Math.min((now - last) / 1000, 1/30);
   last = now;
-  if (!P.paused) step(dt);
-  draw();
+  if (!P.paused) simStep(dt);
+  render();
 
   fpsAcc += 1 / Math.max(dt, 1e-3); fpsN++;
   if (now - fpsLast > 500) {
